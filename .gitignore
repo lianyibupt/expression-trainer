@@ -5,6 +5,7 @@ dist/
 .DS_Store
 .idea/
 node_modules/
+models/
 demo-*.html
 prompt-playground.html
 listenhub-*.png
