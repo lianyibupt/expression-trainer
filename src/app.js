@@ -13,9 +13,18 @@ class ExpressionTrainer {
     this.stats = { fillers: 0, hedges: 0, vagueWords: 0, totalWords: 0, duration: 0 };
     this.lastFeedbackText = '';
     this.lastReport = '';
+    this.settings = null;
+    this.meetingSession = null;
+    this.isStoppingRecording = false;
+    this.activityMonitor = null;
+    this.lastActivityUpdateAt = 0;
+    this.micActivityThreshold = 0.02;
+    this.systemAudioStream = null;
+    this.systemAudioAnalyser = null;
 
     this.initElements();
     this.bindEvents();
+    this.loadSettingsAndMaybeAutoStart();
   }
 
   initElements() {
@@ -27,6 +36,12 @@ class ExpressionTrainer {
     this.btnReport = document.getElementById('btn-report');
     this.btnSettings = document.getElementById('btn-settings');
     this.btnCloseReport = document.getElementById('btn-close-report');
+    this.reviewModal = document.getElementById('review-modal');
+    this.reviewSummary = document.getElementById('review-summary');
+    this.btnReviewClose = document.getElementById('btn-review-close');
+    this.btnReviewDiscard = document.getElementById('btn-review-discard');
+    this.btnReviewSave = document.getElementById('btn-review-save');
+    this.btnReviewReport = document.getElementById('btn-review-report');
     this.btnClosePaste = document.getElementById('btn-close-paste');
     this.btnAnalyzePaste = document.getElementById('btn-analyze-paste');
     this.btnCopyText = document.getElementById('btn-copy-text');
@@ -57,6 +72,10 @@ class ExpressionTrainer {
     this.btnSettings.addEventListener('click', () => window.api.openSettings());
     document.getElementById('btn-prompt-editor').addEventListener('click', () => window.api.openPromptEditor());
     this.btnCloseReport.addEventListener('click', () => this.reportModal.classList.add('hidden'));
+    this.btnReviewClose.addEventListener('click', () => this.reviewModal.classList.add('hidden'));
+    this.btnReviewDiscard.addEventListener('click', () => this.discardCurrentRecording());
+    this.btnReviewSave.addEventListener('click', () => this.confirmSaveTranscript());
+    this.btnReviewReport.addEventListener('click', () => this.confirmSaveAndReport());
     this.btnCopyReport.addEventListener('click', () => {
       const reportText = this.reportBody.innerText;
       navigator.clipboard.writeText(reportText).then(() => {
@@ -71,40 +90,277 @@ class ExpressionTrainer {
     this.btnClear.addEventListener('click', () => this.clearAll());
   }
 
+  async loadSettingsAndMaybeAutoStart() {
+    this.settings = await window.api.getSettings();
+    this.micActivityThreshold = Number(this.settings?.meeting?.micActivityThreshold || 0.02);
+    if (this.settings?.meeting?.autoStartRecording) {
+      setTimeout(() => {
+        if (!this.isRecording && !this.fullText.trim()) this.startRecording();
+      }, 600);
+    } else if (this.settings?.meeting?.autoDetectMeeting) {
+      setTimeout(() => this.startActivityMonitor(), 600);
+    }
+  }
+
+  async getSettings() {
+    this.settings = await window.api.getSettings();
+    return this.settings;
+  }
+
   // ===== 录制控制 =====
 
-  async startRecording() {
+  calculateRMS(samples) {
+    let sum = 0;
+    for (let i = 0; i < samples.length; i++) {
+      sum += samples[i] * samples[i];
+    }
+    return Math.sqrt(sum / samples.length);
+  }
+
+  analyserIsActive(analyser) {
+    if (!analyser) return false;
+
+    const samples = new Float32Array(analyser.fftSize);
+    analyser.getFloatTimeDomainData(samples);
+    return this.calculateRMS(samples) >= this.micActivityThreshold;
+  }
+
+  async updateMeetingActivityState({ hasInput, hasOutput }) {
+    const now = Date.now();
+    if (now - this.lastActivityUpdateAt < 1000) return;
+    this.lastActivityUpdateAt = now;
+
+    const result = await window.api.updateMeetingActivity({
+      hasInput,
+      hasOutput,
+      nowMs: now
+    });
+
+    if (result?.action === 'start' && !this.isRecording) {
+      this.isAutoRecording = true;
+      this.addFeedbackItem('检测到会议，自动开始录音', 'good');
+      await this.stopActivityMonitor();
+      await this.startRecording({ autoStarted: true });
+    }
+
+    if (result?.action === 'review' && this.isRecording && !this.isStoppingRecording) {
+      this.addFeedbackItem('检测到长时间无输入，请确认是否保存', 'ai');
+      await this.stopRecording({ autoStopped: true, needsReview: true });
+    }
+
+    if (result?.action === 'discard' && this.isRecording && !this.isStoppingRecording) {
+      this.addFeedbackItem('短时声音已忽略', 'filler');
+      await this.stopRecording({ autoStopped: true, discard: true });
+    }
+  }
+
+  async updateMeetingActivityFromSamples(samples, { hasOutput = false } = {}) {
+    const rms = this.calculateRMS(samples);
+    await this.updateMeetingActivityState({
+      hasInput: rms >= this.micActivityThreshold || hasOutput,
+      hasOutput
+    });
+  }
+
+  buildAudioConstraints(deviceId) {
+    const audio = {
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false
+    };
+
+    if (deviceId) {
+      audio.deviceId = { exact: deviceId };
+    }
+
+    return { audio };
+  }
+
+  async requestMicStream() {
+    const settings = await this.getSettings();
+    return navigator.mediaDevices.getUserMedia(this.buildAudioConstraints(settings?.meeting?.micDeviceId));
+  }
+
+  async requestVirtualSystemAudioInput(contextLabel, settings) {
+    const deviceId = settings?.meeting?.systemAudioDeviceId;
+    if (!deviceId) return null;
+
+    if (deviceId === settings?.meeting?.micDeviceId) {
+      this.addFeedbackItem(`${contextLabel}系统音频设备与麦克风相同，已跳过重复采集`, 'filler');
+      return null;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia(this.buildAudioConstraints(deviceId));
+      this.addFeedbackItem(`${contextLabel}已接入系统音频输入设备`, 'good');
+      return stream;
+    } catch (error) {
+      this.addFeedbackItem(`${contextLabel}系统音频输入设备不可用：${error.message}`, 'filler');
+      return null;
+    }
+  }
+
+  async requestSystemAudioStream(contextLabel) {
+    const settings = await this.getSettings();
+    if (!settings?.meeting?.captureSystemAudio) return null;
+
+    const virtualInputStream = await this.requestVirtualSystemAudioInput(contextLabel, settings);
+    if (virtualInputStream) return virtualInputStream;
+
+    if (!navigator.mediaDevices.getDisplayMedia) {
+      this.addFeedbackItem('当前环境不支持系统音频捕获', 'filler');
+      return null;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          frameRate: 1,
+          width: { max: 16 },
+          height: { max: 16 }
+        },
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false
+        }
+      });
+
+      if (stream.getAudioTracks().length === 0) {
+        stream.getTracks().forEach(track => track.stop());
+        const status = await window.api.getSystemAudioStatus();
+        const authHint = status?.platform === 'darwin'
+          ? '请到系统设置 > 隐私与安全性 > 屏幕录制，允许本应用后重启应用'
+          : '请确认系统允许本应用捕获屏幕/系统音频';
+        this.addFeedbackItem(`${contextLabel}未获得系统音频轨道：${authHint}`, 'filler');
+        return null;
+      }
+
+      stream.getVideoTracks().forEach(track => track.stop());
+
+      this.addFeedbackItem(`${contextLabel}已接入系统输出声音`, 'good');
+      return stream;
+    } catch (err) {
+      const status = await window.api.getSystemAudioStatus();
+      const authHint = status?.platform === 'darwin'
+        ? '请检查屏幕录制权限并重启应用'
+        : '请检查系统音频捕获权限';
+      this.addFeedbackItem(`${contextLabel}系统音频捕获失败：${err.message}。${authHint}`, 'filler');
+      return null;
+    }
+  }
+
+  async startActivityMonitor() {
+    if (this.activityMonitor || this.isRecording) return;
+
+    try {
+      const settings = await this.getSettings();
+      const stream = await this.requestMicStream();
+      const systemStream = settings?.meeting?.captureSystemAudio ? await this.requestSystemAudioStream('监听') : null;
+      const audioContext = new AudioContext({ sampleRate: 16000 });
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 2048;
+      source.connect(analyser);
+
+      let systemAnalyser = null;
+      if (systemStream) {
+        const systemAudioOnlyStream = new MediaStream(systemStream.getAudioTracks());
+        const systemSource = audioContext.createMediaStreamSource(systemAudioOnlyStream);
+        systemAnalyser = audioContext.createAnalyser();
+        systemAnalyser.fftSize = 2048;
+        systemSource.connect(systemAnalyser);
+      }
+
+      const samples = new Float32Array(analyser.fftSize);
+      const interval = setInterval(() => {
+        analyser.getFloatTimeDomainData(samples);
+        const micActive = this.calculateRMS(samples) >= this.micActivityThreshold;
+        const systemActive = this.analyserIsActive(systemAnalyser);
+        this.updateMeetingActivityState({ hasInput: micActive || systemActive, hasOutput: systemActive });
+      }, 1000);
+
+      this.activityMonitor = { stream, systemStream, audioContext, source, analyser, systemAnalyser, interval };
+      this.addFeedbackItem('正在后台监听会议开始', 'ai');
+    } catch (err) {
+      this.showError(`自动会议监听启动失败: ${err.message}`);
+    }
+  }
+
+  async stopActivityMonitor() {
+    if (!this.activityMonitor) return;
+
+    clearInterval(this.activityMonitor.interval);
+    this.activityMonitor.stream.getTracks().forEach(track => track.stop());
+    if (this.activityMonitor.systemStream) {
+      this.activityMonitor.systemStream.getTracks().forEach(track => track.stop());
+    }
+    await this.activityMonitor.audioContext.close();
+    this.activityMonitor = null;
+  }
+
+  async startRecording(options = {}) {
+    await this.stopActivityMonitor();
+
     const initResult = await window.api.initASR();
     if (!initResult.success) {
       this.showError(`语音识别启动失败: ${initResult.error}`);
+      const settings = await this.getSettings();
+      if (settings?.meeting?.autoDetectMeeting) await this.startActivityMonitor();
       return;
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const settings = await this.getSettings();
+      const stream = await this.requestMicStream();
+      this.systemAudioStream = settings?.meeting?.captureSystemAudio ? await this.requestSystemAudioStream('录音') : null;
       this.audioContext = new AudioContext({ sampleRate: 16000 });
       const source = this.audioContext.createMediaStreamSource(stream);
+      const micGain = this.audioContext.createGain();
+      micGain.gain.value = this.systemAudioStream ? 0.75 : 1;
       this.audioProcessor = this.audioContext.createScriptProcessor(4096, 1, 1);
       this.audioProcessor.onaudioprocess = async (e) => {
         if (!this.isRecording || this.isPaused) return;
         const samples = e.inputBuffer.getChannelData(0);
+        const systemActive = this.analyserIsActive(this.systemAudioAnalyser);
+        await this.updateMeetingActivityFromSamples(samples, { hasOutput: systemActive });
         const result = await window.api.feedAudio(samples);
         if (result) this.handleASRResult(result);
       };
-      source.connect(this.audioProcessor);
+
+      source.connect(micGain);
+      micGain.connect(this.audioProcessor);
+
+      if (this.systemAudioStream) {
+        const systemAudioOnlyStream = new MediaStream(this.systemAudioStream.getAudioTracks());
+        const systemSource = this.audioContext.createMediaStreamSource(systemAudioOnlyStream);
+        const systemGain = this.audioContext.createGain();
+        systemGain.gain.value = 0.75;
+        this.systemAudioAnalyser = this.audioContext.createAnalyser();
+        this.systemAudioAnalyser.fftSize = 2048;
+        systemSource.connect(systemGain);
+        systemSource.connect(this.systemAudioAnalyser);
+        systemGain.connect(this.audioProcessor);
+      }
+
       this.audioProcessor.connect(this.audioContext.destination);
       this.mediaStream = stream;
     } catch (err) {
       this.showError(`麦克风访问失败: ${err.message}`);
+      const settings = await this.getSettings();
+      if (settings?.meeting?.autoDetectMeeting) await this.startActivityMonitor();
       return;
     }
 
     this.isRecording = true;
+    this.isAutoRecording = Boolean(options.autoStarted);
+    this.isStoppingRecording = false;
     this.isPaused = false;
     this.startTime = Date.now();
     this.pausedTime = 0;
     this.fullText = '';
     this.sentences = [];
+    this.meetingSession = null;
     this.resetStats();
     this.subtitleContainer.innerHTML = '';
 
@@ -117,6 +373,7 @@ class ExpressionTrainer {
     this.timer.classList.add('active');
 
     this.timerInterval = setInterval(() => this.updateTimer(), 1000);
+    await window.api.markMeetingRecordingStarted();
   }
 
   pauseRecording() {
@@ -136,18 +393,29 @@ class ExpressionTrainer {
     this.timer.classList.add('active');
   }
 
-  async stopRecording() {
+  async stopRecording(options = {}) {
+    if (this.isStoppingRecording) return;
+    this.isStoppingRecording = true;
+
     if (this.audioProcessor) { this.audioProcessor.disconnect(); this.audioProcessor = null; }
     if (this.audioContext) { this.audioContext.close(); this.audioContext = null; }
     if (this.mediaStream) { this.mediaStream.getTracks().forEach(t => t.stop()); this.mediaStream = null; }
-    await window.api.stopASR();
+    if (this.systemAudioStream) { this.systemAudioStream.getTracks().forEach(t => t.stop()); this.systemAudioStream = null; }
+    this.systemAudioAnalyser = null;
+    const stopResult = await window.api.stopASR();
     this.isRecording = false;
     this.isPaused = false;
+    await window.api.markMeetingRecordingStopped();
 
     clearInterval(this.timerInterval);
     let totalPaused = this.pausedTime;
     if (this.pauseStart) totalPaused += Date.now() - this.pauseStart;
-    this.stats.duration = Math.floor((Date.now() - this.startTime - totalPaused) / 1000);
+    const duration = Math.floor((Date.now() - this.startTime - totalPaused) / 1000);
+    this.stats.duration = duration;
+
+    if (stopResult?.finalText) {
+      await this.loadTranscriptText(stopResult.finalText, { duration, requestFeedback: false });
+    }
 
     // UI：显示生成报告按钮，可翻阅字幕
     this.btnStop.classList.add('hidden');
@@ -156,12 +424,60 @@ class ExpressionTrainer {
     this.btnStart.classList.remove('hidden');
     this.timer.classList.remove('active');
 
-    if (this.fullText.trim()) {
+    if (options.discard) {
+      this.clearAll();
+    } else if (this.fullText.trim()) {
       this.btnReport.classList.remove('hidden');
       this.btnCopyText.classList.remove('hidden');
       this.btnSaveText.classList.remove('hidden');
       this.btnClear.classList.remove('hidden');
+      this.showReviewModal();
     }
+
+    this.isStoppingRecording = false;
+
+    const settings = await this.getSettings();
+    if (settings?.meeting?.autoDetectMeeting) {
+      await this.startActivityMonitor();
+    }
+  }
+
+  showReviewModal() {
+    const durationText = `${this.stats.duration || 0}秒`;
+    const wordText = `${this.stats.totalWords || this.fullText.length}字`;
+    this.reviewSummary.textContent = `检测到一段录音：时长 ${durationText}，约 ${wordText}。请确认是否保存原始对话，或继续生成表达分析报告。`;
+    this.reviewModal.classList.remove('hidden');
+  }
+
+  async confirmSaveTranscript() {
+    const settings = await this.getSettings();
+    if (!settings?.meeting?.autoSaveArtifacts) {
+      this.addFeedbackItem('设置未开启保存原文', 'filler');
+      return;
+    }
+    await this.saveMeetingTranscriptArtifact();
+    this.reviewModal.classList.add('hidden');
+  }
+
+  async confirmSaveAndReport() {
+    const settings = await this.getSettings();
+    if (!settings?.meeting?.autoSaveArtifacts) {
+      this.addFeedbackItem('设置未开启保存原文', 'filler');
+      return;
+    }
+    if (!settings?.meeting?.autoGenerateReport) {
+      this.addFeedbackItem('设置未开启报告生成', 'filler');
+      return;
+    }
+    await this.saveMeetingTranscriptArtifact();
+    this.reviewModal.classList.add('hidden');
+    await this.generateReport({ autoSave: true });
+  }
+
+  discardCurrentRecording() {
+    this.reviewModal.classList.add('hidden');
+    this.clearAll();
+    this.addFeedbackItem('录音已丢弃', 'filler');
   }
 
   // ===== ASR结果处理 =====
@@ -253,6 +569,39 @@ class ExpressionTrainer {
     }
   }
 
+  splitTranscript(text) {
+    return text.split(/(?<=[。！？!?\n])/g).map(s => s.trim()).filter(Boolean);
+  }
+
+  async loadTranscriptText(text, { duration = 0, requestFeedback = true } = {}) {
+    this.subtitleContainer.innerHTML = '';
+    this.fullText = text.trim();
+    this.sentences = this.splitTranscript(this.fullText);
+    this.resetStats();
+
+    for (const sentence of this.sentences) {
+      const line = document.createElement('div');
+      line.className = 'subtitle-line';
+      line.innerHTML = this.highlightText(sentence);
+      this.subtitleContainer.appendChild(line);
+
+      const analysis = await window.api.analyzeText(sentence);
+      if (analysis) {
+        this.stats.fillers += analysis.fillers.length;
+        this.stats.hedges += analysis.hedges.length;
+        this.stats.vagueWords += analysis.vagueWords.length;
+        this.stats.totalWords += analysis.totalWords;
+      }
+    }
+
+    this.stats.duration = duration;
+    this.updateStatsDisplay();
+
+    if (requestFeedback) {
+      this.requestRealtimeFeedback();
+    }
+  }
+
   updateStatsDisplay() {
     this.statFillers.textContent = this.stats.fillers;
     this.statHedges.textContent = this.stats.hedges;
@@ -306,7 +655,7 @@ class ExpressionTrainer {
 
   // ===== 报告 =====
 
-  async generateReport() {
+  async generateReport(options = {}) {
     this.reportBody.innerHTML = '<p style="text-align:center;color:#666;padding:40px;">正在生成报告...</p>';
     this.reportModal.classList.remove('hidden');
 
@@ -318,6 +667,9 @@ class ExpressionTrainer {
     if (result.success) {
       this.lastReport = result.report;
       this.renderReport(result.report);
+      if (options.autoSave) {
+        await this.saveMeetingReportArtifact(result.report);
+      }
     } else {
       this.reportBody.innerHTML = `<p style="color:#ff6b6b;">生成失败: ${result.error}</p>`;
     }
@@ -364,6 +716,43 @@ class ExpressionTrainer {
       }
     } catch (e) {
       alert('保存失败: ' + e.message);
+    }
+  }
+
+  async saveMeetingTranscriptArtifact() {
+    const settings = await this.getSettings();
+    if (!settings?.meeting?.autoSaveArtifacts || !this.fullText.trim()) return;
+    if (this.meetingSession?.sessionDir) return;
+
+    const result = await window.api.saveMeetingTranscript({
+      transcript: this.fullText,
+      stats: this.stats
+    });
+
+    if (result.success) {
+      this.meetingSession = result;
+      this.addFeedbackItem(`原始对话已保存：${result.sessionDir}`, 'good');
+    } else {
+      this.addFeedbackItem(`保存原文失败：${result.error}`, 'filler');
+    }
+  }
+
+  async saveMeetingReportArtifact(report) {
+    const settings = await this.getSettings();
+    if (!settings?.meeting?.autoSaveArtifacts || !this.meetingSession?.sessionDir) return;
+
+    const result = await window.api.saveMeetingReport({
+      sessionDir: this.meetingSession.sessionDir,
+      transcript: this.fullText,
+      report,
+      stats: this.stats
+    });
+
+    if (result.success) {
+      this.meetingSession = { ...this.meetingSession, ...result };
+      this.addFeedbackItem(`分析报告已保存：${result.reportPath}`, 'good');
+    } else {
+      this.addFeedbackItem(`保存报告失败：${result.error}`, 'filler');
     }
   }
 
@@ -425,6 +814,7 @@ class ExpressionTrainer {
     this.fullText = '';
     this.sentences = [];
     this.lastReport = '';
+    this.meetingSession = null;
     this.subtitleContainer.innerHTML = '<div class="subtitle-line hint">点击下方按钮开始说话</div>';
     this.feedbackContent.innerHTML = '';
     this.resetStats();
@@ -451,33 +841,7 @@ class ExpressionTrainer {
     // 关闭粘贴弹窗
     this.pasteModal.classList.add('hidden');
 
-    // 把文本显示到字幕区（高亮标记）
-    this.subtitleContainer.innerHTML = '';
-    this.fullText = text;
-    this.resetStats();
-
-    // 按句号/问号/感叹号/换行分句
-    const sentences = text.split(/(?<=[。！？\n])/g).filter(s => s.trim());
-    this.sentences = sentences;
-
-    for (const sentence of sentences) {
-      const line = document.createElement('div');
-      line.className = 'subtitle-line';
-      line.innerHTML = this.highlightText(sentence.trim());
-      this.subtitleContainer.appendChild(line);
-
-      // 词库分析
-      const analysis = await window.api.analyzeText(sentence);
-      if (analysis) {
-        this.stats.fillers += analysis.fillers.length;
-        this.stats.hedges += analysis.hedges.length;
-        this.stats.vagueWords += analysis.vagueWords.length;
-        this.stats.totalWords += analysis.totalWords;
-      }
-    }
-
-    this.stats.duration = 0; // 粘贴模式没有时长
-    this.updateStatsDisplay();
+    await this.loadTranscriptText(text, { duration: 0, requestFeedback: false });
 
     // 显示操作按钮
     this.btnReport.classList.remove('hidden');

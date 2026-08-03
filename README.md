@@ -7,6 +7,9 @@
 ## 功能
 
 - 🎤 **实时语音识别**：基于 Sherpa-ONNX，完全离线，中文优化
+- 🎙️ **会议自动转写**：支持本机麦克风录音，可配置 SenseVoice/Paraformer 离线转文字
+- 👂 **自动发现会议**：后台监听麦克风活跃度，连续活跃后自动开始录音，长时间无输入后进入确认
+- 🗂️ **会议产物归档**：录音结束后先确认，再保存原始对话、分析报告和元数据
 - 📝 **全屏字幕显示**：黑底大字，实时显示你说的每一句话
 - 🔍 **词库分析**：自动检测填充词、犹豫词、笼统词，给出精准替代
 - 🤖 **AI反馈**：支持 Groq/OpenAI/DeepSeek/Ollama 多后端
@@ -21,7 +24,33 @@ cd expression-trainer
 npm install
 ```
 
-### 2. 下载语音识别模型
+### 2. 配置语音识别模型
+
+默认推荐使用 sherpa-onnx 兼容导出的 SenseVoice Small int8：
+
+```text
+models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17-int8/
+```
+
+目录内应包含：
+
+```text
+sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17-int8/
+├── model.int8.onnx
+└── tokens.txt
+```
+
+推荐顺序：
+
+| 模型预设 | 场景 | 特点 |
+|------|------|------|
+| SenseVoice Small int8 | 中文会议、结束后生成高质量逐字稿 | 小模型、本地离线、非实时最终转写 |
+| Paraformer 中英双语 | 需要边说边看实时字幕 | 流式识别、延迟低 |
+| 自定义 SenseVoice 兼容导出 | 你自己转换/下载了 sherpa-onnx 兼容 SenseVoice | 需要目录内有 `model.onnx` 和 `tokens.json` |
+
+注意：当前项目通过 `sherpa-onnx-node` 加载 SenseVoice。你之前提供的 Shandianshuo 模型实测缺少 sherpa-onnx 所需的 `vocab_size` 元数据，不能直接作为默认模型；因此新版默认改为官方 sherpa-onnx 兼容的 SenseVoice int8 目录。
+
+使用 Paraformer 预设时需要下载 streaming paraformer 中英双语模型：
 
 需要下载 Sherpa-ONNX 的 streaming paraformer 中英双语模型：
 
@@ -50,9 +79,33 @@ models/
 npm start
 ```
 
-### 4. 配置 AI 后端
+### 4. 配置 AI 后端和会议录音
 
 启动后点击右上角 ⚙️ 进入设置页面。
+
+会议录音设置：
+
+| 选项 | 说明 |
+|------|------|
+| 本地识别模型 | 默认 SenseVoice Small int8；也可切换 Paraformer 流式识别或自定义 SenseVoice |
+| 自定义 SenseVoice 模型目录 | 仅在选择自定义预设时填写，必须是 sherpa-onnx 兼容导出 |
+| 会议文件保存目录 | 留空时保存到 `Documents/Expression Trainer Meetings` |
+| 打开应用后自动开始录音 | 开启后进入主界面会自动请求麦克风并开始录音 |
+| 登录后自动启动应用 | 尽量避免忘记打开应用；应用启动后才能监听麦克风 |
+| 自动监听麦克风并发现会议 | 开启后后台监听音量，连续活跃达到阈值后开始录音 |
+| 录制系统输出声音 | 开启后会尝试通过屏幕/窗口共享捕获系统音频，并与麦克风混合转写 |
+| 麦克风输入设备 | 默认使用系统麦克风，也可指定某个输入设备 |
+| 系统音频输入设备 | 推荐选择 BlackHole 2ch / Loopback 等虚拟声卡输入 |
+| 自动开始阈值 | 默认 60 秒，表示连续检测到麦克风输入 1 分钟后开始录音 |
+| 待确认阈值 | 默认 180 秒，表示连续无麦克风输入 3 分钟后停止录音并弹出确认 |
+| 最短录音确认时长 | 默认 120 秒，短于该时长的自动录音会当作误触忽略 |
+| 麦克风活跃阈值 | 默认 0.02，环境噪音大调高，检测不到说话调低 |
+| 确认后保存原始对话和报告 | 开启后，你在确认框选择保存时才会创建会议目录 |
+| 确认时允许生成对话报告 | 开启后，确认框会允许保存并生成报告 |
+
+自动发现会议说明：应用必须处于运行状态才能监听麦克风。建议同时开启“登录后自动启动应用”和“自动监听麦克风并发现会议”。当前纯 Electron 版本无法稳定读取系统级“其他应用是否正在播放音频”，所以连续无麦克风输入不会直接保存或分析，只会停止当前录音并弹出确认框；代码层已经保留 `hasOutput` 条件，后续可以接 macOS CoreAudio/native helper 后变成“无麦克风且无音频输出 3 分钟后待确认”。
+
+系统输出录制说明：最稳定的方案是使用虚拟声卡。安装 BlackHole / Loopback 后，把会议软件或系统输出路由到虚拟声卡，并在设置页的“系统音频输入设备”里选择 `BlackHole 2ch` 或对应设备。应用会把“麦克风输入设备”和“系统音频输入设备”混合送入 ASR。若没有选择虚拟输入设备，应用才会 fallback 到 Electron display media handler 的 `audio: 'loopback'` 方案；这个 fallback 在 macOS 上兼容性较弱，可能仍然拿不到音频轨道。
 
 推荐配置：
 
@@ -67,10 +120,22 @@ npm start
 ## 使用说明
 
 1. **点击「开始录制」** → 对着麦克风说话
-2. **实时字幕**会在屏幕中央显示你说的内容
+2. 使用 SenseVoice 时，结束录音后会生成最终逐字稿；使用 Paraformer 时会实时显示字幕
 3. **左侧面板**实时统计填充词/犹豫词/笼统词
 4. **右侧面板**每50字会给出AI实时反馈
-5. **说完后点击「结束」** → 可以点「生成报告」获取完整分析
+5. **说完后点击「结束」** → 先确认是否保存原始对话，或保存并生成报告
+
+自动模式下可以不用点击「开始录制」：开启“自动监听麦克风并发现会议”后，应用会在后台检测麦克风活跃度；连续活跃达到 60 秒后自动开始录音，连续无输入达到 180 秒后停止录音并弹出确认。短于 120 秒的自动录音会被当作误触忽略，不会保存也不会生成报告。
+
+自动归档目录结构示例：
+
+```text
+Documents/Expression Trainer Meetings/
+└── 2026-08-03-091011/
+    ├── transcript.md   # 原始对话
+    ├── report.md       # 对话分析报告
+    └── metadata.json   # 时长、字数、文件索引等元数据
+```
 
 ## 字幕颜色含义
 
@@ -86,8 +151,9 @@ npm start
 ```
 ┌─────────────────────────────────────────┐
 │ Electron 主进程                          │
-│  ├── Sherpa-ONNX (离线语音识别)          │
+│  ├── SenseVoice / Sherpa-ONNX (离线语音识别) │
 │  ├── 词库匹配 (emotion-lexicon.json)     │
+│  ├── 会议产物归档 (transcript/report)     │
 │  └── AI反馈 (多后端 HTTP API)            │
 ├─────────────────────────────────────────┤
 │ 渲染进程 (Chromium)                      │
@@ -128,6 +194,7 @@ npm run dev
 │   ├── asr.js           # 语音识别
 │   ├── lexicon.js       # 词库匹配
 │   ├── ai-feedback.js   # AI反馈
+│   ├── meeting-session.js # 会议原文/报告归档
 │   └── prompts.js       # Prompt模板
 ├── data/
 │   └── emotion-lexicon.json
@@ -144,4 +211,3 @@ npm run dev
 ## License
 
 MIT
-

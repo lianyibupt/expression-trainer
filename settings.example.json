@@ -18,5 +18,26 @@
       "baseUrl": "https://api.example.com/v1",
       "model": ""
     }
+  },
+  "asr": {
+    "modelPreset": "sensevoice-int8",
+    "engine": "sensevoice",
+    "modelPath": "",
+    "language": "zh"
+  },
+  "meeting": {
+    "autoStartRecording": false,
+    "launchAtLogin": false,
+    "autoDetectMeeting": false,
+    "autoStartAfterSec": 60,
+    "autoStopAfterSec": 180,
+    "minReviewRecordingSec": 120,
+    "micActivityThreshold": 0.02,
+    "captureSystemAudio": true,
+    "micDeviceId": "",
+    "systemAudioDeviceId": "",
+    "autoGenerateReport": true,
+    "autoSaveArtifacts": true,
+    "outputDir": ""
   }
 }

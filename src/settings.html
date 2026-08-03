@@ -139,6 +139,32 @@
       opacity: 0.6;
       pointer-events: none;
     }
+
+    .settings-section {
+      margin-top: 28px;
+      padding-top: 20px;
+      border-top: 1px solid #333;
+    }
+
+    .settings-section h2 {
+      font-size: 14px;
+      color: #ddd;
+      margin-bottom: 16px;
+      font-weight: 600;
+    }
+
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+      color: #ccc;
+      font-size: 13px;
+    }
+
+    .checkbox-row input {
+      width: auto;
+    }
   </style>
 </head>
 <body>
@@ -183,6 +209,99 @@
     <div class="form-group conditional" id="group-custom-model">
       <label>自定义模型名</label>
       <input type="text" id="custom-model" placeholder="model-name">
+    </div>
+
+    <div class="settings-section">
+      <h2>会议录音</h2>
+
+      <div class="form-group">
+        <label>本地识别模型</label>
+        <select id="asr-model-preset">
+          <option value="sensevoice-int8">SenseVoice Small int8（推荐，离线最终转写）</option>
+          <option value="paraformer-streaming">Paraformer 中英双语（流式字幕）</option>
+          <option value="sensevoice-custom">自定义 SenseVoice 兼容导出</option>
+        </select>
+        <div class="hint" id="asr-model-hint"></div>
+      </div>
+
+      <div class="form-group" id="group-sensevoice-path">
+        <label>自定义 SenseVoice 模型目录</label>
+        <input type="text" id="sensevoice-model-path" placeholder="/path/to/sherpa-onnx-sensevoice-export">
+        <div class="hint">目录内需要包含 sherpa-onnx 兼容的 model.onnx 和 tokens.json</div>
+      </div>
+
+      <div class="form-group">
+        <label>会议文件保存目录</label>
+        <input type="text" id="meeting-output-dir" placeholder="留空则保存到 Documents/Expression Trainer Meetings">
+      </div>
+
+      <label class="checkbox-row">
+        <input type="checkbox" id="auto-start-recording">
+        打开应用后自动开始录音
+      </label>
+
+      <label class="checkbox-row">
+        <input type="checkbox" id="launch-at-login">
+        登录后自动启动应用
+      </label>
+
+      <label class="checkbox-row">
+        <input type="checkbox" id="auto-detect-meeting">
+        自动监听麦克风并发现会议
+      </label>
+
+      <label class="checkbox-row">
+        <input type="checkbox" id="capture-system-audio">
+        录制系统输出声音
+      </label>
+
+      <div class="form-group">
+        <label>麦克风输入设备</label>
+        <select id="mic-device"></select>
+        <div class="hint">默认使用系统当前麦克风</div>
+      </div>
+
+      <div class="form-group">
+        <label>系统音频输入设备</label>
+        <select id="system-audio-device"></select>
+        <div class="hint">推荐选择 BlackHole 2ch / Loopback 等虚拟声卡输入</div>
+      </div>
+
+      <button type="button" class="btn-save" id="btn-refresh-audio-devices" style="margin-top:0;margin-bottom:18px;">刷新音频设备</button>
+
+      <div class="form-group">
+        <label>自动开始阈值（秒）</label>
+        <input type="number" id="auto-start-after-sec" min="5" max="600" step="5" placeholder="60">
+        <div class="hint">麦克风连续活跃达到该时长后开始正式录音</div>
+      </div>
+
+      <div class="form-group">
+        <label>待确认阈值（秒）</label>
+        <input type="number" id="auto-stop-after-sec" min="30" max="1800" step="30" placeholder="180">
+        <div class="hint">连续无麦克风输入后停止录音并弹出确认，不会直接保存或生成报告</div>
+      </div>
+
+      <div class="form-group">
+        <label>最短录音确认时长（秒）</label>
+        <input type="number" id="min-review-recording-sec" min="30" max="3600" step="30" placeholder="120">
+        <div class="hint">短于该时长的自动录音会被当作误触忽略</div>
+      </div>
+
+      <div class="form-group">
+        <label>麦克风活跃阈值</label>
+        <input type="number" id="mic-activity-threshold" min="0.001" max="0.2" step="0.001" placeholder="0.02">
+        <div class="hint">环境噪音大就调高，检测不到说话就调低</div>
+      </div>
+
+      <label class="checkbox-row">
+        <input type="checkbox" id="auto-save-artifacts">
+        确认后保存原始对话和报告
+      </label>
+
+      <label class="checkbox-row">
+        <input type="checkbox" id="auto-generate-report">
+        确认时允许生成对话报告
+      </label>
     </div>
 
     <div class="message-container">

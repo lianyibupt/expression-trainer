@@ -1,9 +1,18 @@
-const { app, BrowserWindow, ipcMain, session, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, session, Menu, desktopCapturer } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { initASR, feedAudio, stopRecognition } = require('./lib/asr');
 const { loadLexicon, analyzeText } = require('./lib/lexicon');
 const { sendFeedback, sendReport, testConnection } = require('./lib/ai-feedback');
+const { createTranscriptArtifact, saveReportArtifact } = require('./lib/meeting-session');
+const { MeetingActivityDetector } = require('./lib/meeting-activity-detector');
+
+app.commandLine.appendSwitch('enable-features', [
+  'MacLoopbackAudioForScreenShare',
+  'MacSckSystemAudioLoopbackOverride',
+  'MacCatapSystemAudioLoopbackCapture',
+  'PulseaudioLoopbackForScreenShare'
+].join(','));
 
 // 覆盖应用显示名称（菜单栏、Dock、任务栏、窗口标题）
 app.setName('宇宙无敌表达训练');
@@ -12,6 +21,8 @@ let mainWindow;
 let settingsWindow;
 let promptEditorWindow;
 let asrReady = false;
+let displayMediaHandlerReady = false;
+const meetingActivityDetector = new MeetingActivityDetector();
 
 // Custom prompt 文件路径
 function getCustomPromptPath() {
@@ -38,6 +49,29 @@ const DEFAULT_PROVIDER_CONFIGS = {
   custom: { apiKey: '', baseUrl: '', model: '' }
 };
 
+const DEFAULT_ASR_CONFIG = {
+  modelPreset: 'sensevoice-int8',
+  engine: 'sensevoice',
+  modelPath: '',
+  language: 'zh'
+};
+
+const DEFAULT_MEETING_CONFIG = {
+  autoStartRecording: false,
+  autoDetectMeeting: false,
+  autoStartAfterSec: 60,
+  autoStopAfterSec: 180,
+  minReviewRecordingSec: 120,
+  micActivityThreshold: 0.02,
+  captureSystemAudio: true,
+  micDeviceId: '',
+  systemAudioDeviceId: '',
+  launchAtLogin: false,
+  autoGenerateReport: true,
+  autoSaveArtifacts: true,
+  outputDir: ''
+};
+
 // 设置文件路径
 function getSettingsPath() {
   return path.join(app.getPath('userData'), 'settings.json');
@@ -56,7 +90,9 @@ function loadSettings() {
           deepseek: { ...DEFAULT_PROVIDER_CONFIGS.deepseek },
           ollama: { ...DEFAULT_PROVIDER_CONFIGS.ollama },
           custom: { ...DEFAULT_PROVIDER_CONFIGS.custom }
-        }
+        },
+        asr: { ...DEFAULT_ASR_CONFIG, ...(raw.asr || {}) },
+        meeting: { ...DEFAULT_MEETING_CONFIG, ...(raw.meeting || {}) }
       };
       // 将旧字段迁移到对应 provider
       const p = migrated.provider;
@@ -76,23 +112,67 @@ function loadSettings() {
         raw.providers[key] = { ...DEFAULT_PROVIDER_CONFIGS[key], ...raw.providers[key] };
       }
     }
+    raw.asr = { ...DEFAULT_ASR_CONFIG, ...(raw.asr || {}) };
+    raw.meeting = { ...DEFAULT_MEETING_CONFIG, ...(raw.meeting || {}) };
     return raw;
   }
   return {
     provider: 'deepseek',
-    providers: JSON.parse(JSON.stringify(DEFAULT_PROVIDER_CONFIGS))
+    providers: JSON.parse(JSON.stringify(DEFAULT_PROVIDER_CONFIGS)),
+    asr: { ...DEFAULT_ASR_CONFIG },
+    meeting: { ...DEFAULT_MEETING_CONFIG }
   };
 }
 
 function saveSettings(settings) {
   const settingsPath = getSettingsPath();
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+  applyLoginItemSettings(settings);
+}
+
+function applyLoginItemSettings(settings) {
+  if (!app.isReady()) return;
+
+  app.setLoginItemSettings({
+    openAtLogin: Boolean(settings.meeting?.launchAtLogin),
+    openAsHidden: Boolean(settings.meeting?.launchAtLogin)
+  });
 }
 
 /** 获取当前选中 provider 的配置 */
 function getCurrentProviderSettings(settings) {
   const config = settings.providers[settings.provider];
   return config || DEFAULT_PROVIDER_CONFIGS[settings.provider] || {};
+}
+
+function getMeetingOutputDir(settings) {
+  return settings.meeting?.outputDir || path.join(app.getPath('documents'), 'Expression Trainer Meetings');
+}
+
+function setupDisplayMediaHandler() {
+  session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
+    try {
+      const sources = await desktopCapturer.getSources({
+        types: ['screen'],
+        thumbnailSize: { width: 0, height: 0 },
+        fetchWindowIcons: false
+      });
+
+      if (!sources.length) {
+        callback({});
+        return;
+      }
+
+      callback({
+        video: sources[0],
+        audio: 'loopback'
+      });
+    } catch (error) {
+      console.error('[SystemAudio] 获取桌面音频源失败:', error);
+      callback({});
+    }
+  }, { useSystemPicker: false });
+  displayMediaHandlerReady = true;
 }
 
 function createMainWindow() {
@@ -152,7 +232,7 @@ function createSettingsWindow() {
 
   settingsWindow = new BrowserWindow({
     width: 600,
-    height: 500,
+    height: 720,
     resizable: false,
     backgroundColor: '#1a1a1a',
     titleBarStyle: 'hiddenInset',
@@ -174,6 +254,8 @@ function createSettingsWindow() {
 
 // App lifecycle
 app.whenReady().then(() => {
+  setupDisplayMediaHandler();
+
   // macOS 需要显式创建应用菜单，否则菜单栏显示默认的 "Electron"
   // Windows/Linux 上此菜单同样适用，macOS 专属角色（hide/hideOthers）会自动生效
   const appMenuTemplate = [
@@ -260,7 +342,8 @@ ipcMain.handle('close-current-window', (event) => {
 // 语音识别相关 - Web Audio方案
 ipcMain.handle('init-asr', async () => {
   try {
-    await initASR();
+    const settings = loadSettings();
+    await initASR(settings.asr || DEFAULT_ASR_CONFIG);
     asrReady = true;
     return { success: true };
   } catch (error) {
@@ -280,6 +363,39 @@ ipcMain.handle('stop-asr', () => {
   const finalText = stopRecognition();
   asrReady = false;
   return { success: true, finalText };
+});
+
+ipcMain.handle('update-meeting-activity', (event, { hasInput, hasOutput, nowMs }) => {
+  const settings = loadSettings();
+  const meeting = settings.meeting || DEFAULT_MEETING_CONFIG;
+  meetingActivityDetector.startAfterMs = Number(meeting.autoStartAfterSec || 60) * 1000;
+  meetingActivityDetector.reviewAfterMs = Number(meeting.autoStopAfterSec || 180) * 1000;
+  meetingActivityDetector.minReviewRecordingMs = Number(meeting.minReviewRecordingSec || 120) * 1000;
+
+  const action = meetingActivityDetector.update({
+    nowMs: nowMs || Date.now(),
+    hasInput: Boolean(hasInput),
+    hasOutput: Boolean(hasOutput)
+  });
+
+  return { action, isRecording: meetingActivityDetector.isRecording };
+});
+
+ipcMain.handle('mark-meeting-recording-started', () => {
+  meetingActivityDetector.markRecordingStarted();
+  return { success: true };
+});
+
+ipcMain.handle('mark-meeting-recording-stopped', () => {
+  meetingActivityDetector.markRecordingStopped();
+  return { success: true };
+});
+
+ipcMain.handle('get-system-audio-status', () => {
+  return {
+    displayMediaHandlerReady,
+    platform: process.platform
+  };
 });
 
 // LLM 连通性测试
@@ -307,6 +423,43 @@ ipcMain.handle('save-file', async (event, content, filename) => {
     return { success: true, path: result.filePath };
   }
   return { success: false };
+});
+
+ipcMain.handle('save-meeting-transcript', async (event, { transcript, stats }) => {
+  const settings = loadSettings();
+  const rootDir = getMeetingOutputDir(settings);
+
+  try {
+    return {
+      success: true,
+      ...createTranscriptArtifact({
+        rootDir,
+        transcript,
+        stats,
+        now: new Date()
+      })
+    };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('save-meeting-report', async (event, { sessionDir, transcript, report, stats, createdAt }) => {
+  try {
+    return {
+      success: true,
+      ...saveReportArtifact({
+        sessionDir,
+        transcript,
+        report,
+        stats,
+        createdAt,
+        now: new Date()
+      })
+    };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
 });
 
 // AI反馈（传入customPrompt）

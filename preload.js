@@ -16,6 +16,10 @@ contextBridge.exposeInMainWorld('api', {
   initASR: () => ipcRenderer.invoke('init-asr'),
   feedAudio: (samples) => ipcRenderer.invoke('feed-audio', Array.from(samples)),
   stopASR: () => ipcRenderer.invoke('stop-asr'),
+  updateMeetingActivity: (payload) => ipcRenderer.invoke('update-meeting-activity', payload),
+  markMeetingRecordingStarted: () => ipcRenderer.invoke('mark-meeting-recording-started'),
+  markMeetingRecordingStopped: () => ipcRenderer.invoke('mark-meeting-recording-stopped'),
+  getSystemAudioStatus: () => ipcRenderer.invoke('get-system-audio-status'),
   onASRResult: (callback) => {
     ipcRenderer.on('asr-result', (event, data) => callback(data));
   },
@@ -33,4 +37,6 @@ contextBridge.exposeInMainWorld('api', {
 
   // 文件保存
   saveFile: (content, filename) => ipcRenderer.invoke('save-file', content, filename),
+  saveMeetingTranscript: (payload) => ipcRenderer.invoke('save-meeting-transcript', payload),
+  saveMeetingReport: (payload) => ipcRenderer.invoke('save-meeting-report', payload),
 });

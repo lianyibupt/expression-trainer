@@ -142,6 +142,24 @@
     </div>
   </div>
 
+  <!-- 自动录音确认弹窗 -->
+  <div id="review-modal" class="modal hidden">
+    <div class="modal-content modal-content-small">
+      <div class="modal-header">
+        <h2>确认这段录音</h2>
+        <button id="btn-review-close" class="btn-close">×</button>
+      </div>
+      <div class="modal-body">
+        <p id="review-summary" class="review-summary"></p>
+        <div class="review-actions">
+          <button id="btn-review-discard" class="btn-secondary">丢弃</button>
+          <button id="btn-review-save" class="btn-primary">保存原文</button>
+          <button id="btn-review-report" class="btn-primary">保存并生成报告</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>

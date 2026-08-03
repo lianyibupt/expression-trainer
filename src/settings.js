@@ -33,6 +33,12 @@ const PROVIDER_CONFIG = {
   }
 };
 
+const ASR_MODEL_HINTS = {
+  'sensevoice-int8': '下载 sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17-int8 到项目 models/ 目录。结束录音后生成最终逐字稿。',
+  'paraformer-streaming': '使用项目 models/sherpa-onnx-streaming-paraformer-bilingual-zh-en，录音时实时出字幕。',
+  'sensevoice-custom': '只支持 sherpa-onnx 兼容导出的 SenseVoice 目录；普通 FunASR/Shandianshuo 导出可能无法直接加载。'
+};
+
 class SettingsPage {
   constructor() {
     this.providerSelect = document.getElementById('provider');
@@ -43,6 +49,23 @@ class SettingsPage {
     this.ollamaUrlInput = document.getElementById('ollama-url');
     this.customBaseUrlInput = document.getElementById('custom-base-url');
     this.customModelInput = document.getElementById('custom-model');
+    this.asrModelPresetSelect = document.getElementById('asr-model-preset');
+    this.asrModelHint = document.getElementById('asr-model-hint');
+    this.sensevoiceModelPathInput = document.getElementById('sensevoice-model-path');
+    this.meetingOutputDirInput = document.getElementById('meeting-output-dir');
+    this.autoStartRecordingInput = document.getElementById('auto-start-recording');
+    this.launchAtLoginInput = document.getElementById('launch-at-login');
+    this.autoDetectMeetingInput = document.getElementById('auto-detect-meeting');
+    this.captureSystemAudioInput = document.getElementById('capture-system-audio');
+    this.micDeviceSelect = document.getElementById('mic-device');
+    this.systemAudioDeviceSelect = document.getElementById('system-audio-device');
+    this.btnRefreshAudioDevices = document.getElementById('btn-refresh-audio-devices');
+    this.autoStartAfterSecInput = document.getElementById('auto-start-after-sec');
+    this.autoStopAfterSecInput = document.getElementById('auto-stop-after-sec');
+    this.minReviewRecordingSecInput = document.getElementById('min-review-recording-sec');
+    this.micActivityThresholdInput = document.getElementById('mic-activity-threshold');
+    this.autoSaveArtifactsInput = document.getElementById('auto-save-artifacts');
+    this.autoGenerateReportInput = document.getElementById('auto-generate-report');
     this.btnSave = document.getElementById('btn-save');
     this.saveSuccess = document.getElementById('save-success');
 
@@ -50,6 +73,7 @@ class SettingsPage {
     this.groupOllama = document.getElementById('group-ollama');
     this.groupCustom = document.getElementById('group-custom');
     this.groupCustomModel = document.getElementById('group-custom-model');
+    this.groupSensevoicePath = document.getElementById('group-sensevoice-path');
 
     this.bindEvents();
     this.loadSettings();
@@ -57,6 +81,8 @@ class SettingsPage {
 
   bindEvents() {
     this.providerSelect.addEventListener('change', () => this.onProviderChange());
+    this.asrModelPresetSelect.addEventListener('change', () => this.onASRModelChange());
+    this.btnRefreshAudioDevices.addEventListener('click', () => this.loadAudioDevices({ requestPermission: true }));
     this.btnSave.addEventListener('click', () => this.save());
   }
 
@@ -64,9 +90,82 @@ class SettingsPage {
     this.settings = await window.api.getSettings();
 
     this.providerSelect.value = this.settings.provider || 'deepseek';
+    this.loadMeetingFields();
+    await this.loadAudioDevices({ requestPermission: false });
 
     // 先填充模型列表再加载字段值
     this.onProviderChange();
+  }
+
+  loadMeetingFields() {
+    const asr = this.settings.asr || {};
+    const meeting = this.settings.meeting || {};
+
+    const modelPreset = asr.modelPreset || (asr.engine === 'paraformer' ? 'paraformer-streaming' : asr.modelPath ? 'sensevoice-custom' : 'sensevoice-int8');
+
+    this.asrModelPresetSelect.value = modelPreset;
+    this.sensevoiceModelPathInput.value = asr.modelPath || '';
+    this.meetingOutputDirInput.value = meeting.outputDir || '';
+    this.autoStartRecordingInput.checked = Boolean(meeting.autoStartRecording);
+    this.launchAtLoginInput.checked = Boolean(meeting.launchAtLogin);
+    this.autoDetectMeetingInput.checked = Boolean(meeting.autoDetectMeeting);
+    this.captureSystemAudioInput.checked = meeting.captureSystemAudio !== false;
+    this.savedMicDeviceId = meeting.micDeviceId || '';
+    this.savedSystemAudioDeviceId = meeting.systemAudioDeviceId || '';
+    this.autoStartAfterSecInput.value = meeting.autoStartAfterSec || 60;
+    this.autoStopAfterSecInput.value = meeting.autoStopAfterSec || 180;
+    this.minReviewRecordingSecInput.value = meeting.minReviewRecordingSec || 120;
+    this.micActivityThresholdInput.value = meeting.micActivityThreshold || 0.02;
+    this.autoSaveArtifactsInput.checked = meeting.autoSaveArtifacts !== false;
+    this.autoGenerateReportInput.checked = meeting.autoGenerateReport !== false;
+    this.onASRModelChange();
+  }
+
+  async loadAudioDevices({ requestPermission = false } = {}) {
+    if (!navigator.mediaDevices?.enumerateDevices) return;
+
+    let permissionStream = null;
+    if (requestPermission) {
+      try {
+        permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (error) {
+        // Keep going; enumerateDevices may still return device ids without labels.
+      }
+    }
+
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const audioInputs = devices.filter(device => device.kind === 'audioinput');
+    this.populateAudioDeviceSelect(this.micDeviceSelect, audioInputs, this.savedMicDeviceId, '系统默认麦克风');
+    this.populateAudioDeviceSelect(this.systemAudioDeviceSelect, audioInputs, this.savedSystemAudioDeviceId, '不使用虚拟输入');
+
+    if (permissionStream) {
+      permissionStream.getTracks().forEach(track => track.stop());
+    }
+  }
+
+  populateAudioDeviceSelect(select, devices, selectedDeviceId, defaultLabel) {
+    select.innerHTML = '';
+
+    const defaultOption = document.createElement('option');
+    defaultOption.value = '';
+    defaultOption.textContent = defaultLabel;
+    select.appendChild(defaultOption);
+
+    devices.forEach((device, index) => {
+      const option = document.createElement('option');
+      option.value = device.deviceId;
+      option.textContent = device.label || `音频输入 ${index + 1}`;
+      select.appendChild(option);
+    });
+
+    select.value = selectedDeviceId || '';
+    if (selectedDeviceId && select.value !== selectedDeviceId) {
+      const missingOption = document.createElement('option');
+      missingOption.value = selectedDeviceId;
+      missingOption.textContent = '已保存的设备（当前未检测到）';
+      select.appendChild(missingOption);
+      select.value = selectedDeviceId;
+    }
   }
 
   /** 加载指定 provider 的配置到表单字段 */
@@ -117,6 +216,12 @@ class SettingsPage {
     this.loadProviderFields(provider);
   }
 
+  onASRModelChange() {
+    const modelPreset = this.asrModelPresetSelect.value;
+    this.groupSensevoicePath.style.display = modelPreset === 'sensevoice-custom' ? '' : 'none';
+    this.asrModelHint.textContent = ASR_MODEL_HINTS[modelPreset] || '';
+  }
+
   async save() {
     const provider = this.providerSelect.value;
 
@@ -152,6 +257,31 @@ class SettingsPage {
         customModel: ''
       };
     }
+
+    settings.asr = {
+      ...(settings.asr || {}),
+      modelPreset: this.asrModelPresetSelect.value,
+      engine: this.asrModelPresetSelect.value === 'paraformer-streaming' ? 'paraformer' : 'sensevoice',
+      modelPath: this.asrModelPresetSelect.value === 'sensevoice-custom' ? this.sensevoiceModelPathInput.value.trim() : '',
+      language: 'zh'
+    };
+
+    settings.meeting = {
+      ...(settings.meeting || {}),
+      autoStartRecording: this.autoStartRecordingInput.checked,
+      launchAtLogin: this.launchAtLoginInput.checked,
+      autoDetectMeeting: this.autoDetectMeetingInput.checked,
+      captureSystemAudio: this.captureSystemAudioInput.checked,
+      micDeviceId: this.micDeviceSelect.value,
+      systemAudioDeviceId: this.systemAudioDeviceSelect.value,
+      autoStartAfterSec: Number(this.autoStartAfterSecInput.value || 60),
+      autoStopAfterSec: Number(this.autoStopAfterSecInput.value || 180),
+      minReviewRecordingSec: Number(this.minReviewRecordingSecInput.value || 120),
+      micActivityThreshold: Number(this.micActivityThresholdInput.value || 0.02),
+      autoSaveArtifacts: this.autoSaveArtifactsInput.checked,
+      autoGenerateReport: this.autoGenerateReportInput.checked,
+      outputDir: this.meetingOutputDirInput.value.trim()
+    };
 
     await window.api.saveSettings(settings);
 
