@@ -7,7 +7,9 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "build:system-audio-helper": "cd native/system-audio-helper && swift build",
+    "probe:system-audio": "cd native/system-audio-helper && .build/debug/system-audio-probe --duration 10 --out /tmp/system-audio-probe.wav"
   },
   "keywords": ["expression", "training", "speech", "asr", "chinese"],
   "author": "sisi",
