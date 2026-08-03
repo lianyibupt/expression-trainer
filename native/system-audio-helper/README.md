@@ -1,6 +1,8 @@
-# System Audio Helper POC
+# System Audio Helper
 
-This is a stage-one macOS native helper proof of concept. It uses ScreenCaptureKit to capture system output audio and writes a short mono WAV file.
+This is the macOS native system-audio helper for Expression Trainer. It uses ScreenCaptureKit to capture system output audio. The Electron app starts it in JSON streaming mode and mixes the returned 16 kHz mono PCM samples with microphone audio before sending audio to ASR.
+
+The helper can also run as a standalone probe that writes a short mono WAV file for permission and capture validation.
 
 ## Build
 
@@ -13,7 +15,7 @@ npm run build:system-audio-helper
 Or from this directory:
 
 ```bash
-swift build
+CLANG_MODULE_CACHE_PATH=.build/clang-module-cache swift build --cache-path .build/swiftpm-cache
 ```
 
 ## Run Probe
@@ -37,6 +39,24 @@ cd native/system-audio-helper
 .build/debug/system-audio-probe --duration 10 --out /tmp/system-audio-probe.wav
 ```
 
+## Run Stream Mode
+
+Electron uses this mode internally:
+
+```bash
+cd native/system-audio-helper
+.build/debug/system-audio-probe --stream-json
+```
+
+Expected stdout events include:
+
+```json
+{"event":"started","out":"/tmp/system-audio-probe.wav","streamJson":true}
+{"event":"samples","sampleRate":16000,"samples":"<base64 float32 little-endian>"}
+```
+
+Stop stream mode with `Ctrl+C` when running manually.
+
 ## Permission
 
 If you see:
@@ -57,4 +77,4 @@ The probe succeeds when:
 - It prints `finished` with a non-zero sample count.
 - `/tmp/system-audio-probe.wav` contains the system audio you played, even if your microphone was silent.
 
-This helper is intentionally not wired into the Electron app yet. Once the WAV proof is successful on this machine, the next step is to stream PCM chunks from the helper to Electron and mix them with microphone audio for ASR.
+In the main app, enable “录制系统输出声音”. The capture order is Native helper first, then configured virtual input device, then Electron loopback fallback.

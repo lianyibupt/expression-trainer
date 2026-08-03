@@ -20,6 +20,18 @@ contextBridge.exposeInMainWorld('api', {
   markMeetingRecordingStarted: () => ipcRenderer.invoke('mark-meeting-recording-started'),
   markMeetingRecordingStopped: () => ipcRenderer.invoke('mark-meeting-recording-stopped'),
   getSystemAudioStatus: () => ipcRenderer.invoke('get-system-audio-status'),
+  startNativeSystemAudio: () => ipcRenderer.invoke('start-native-system-audio'),
+  stopNativeSystemAudio: () => ipcRenderer.invoke('stop-native-system-audio'),
+  onNativeSystemAudioSamples: (callback) => {
+    ipcRenderer.on('native-system-audio-samples', (event, data) => callback(data));
+  },
+  onNativeSystemAudioEvent: (callback) => {
+    ipcRenderer.on('native-system-audio-event', (event, data) => callback(data));
+  },
+  removeNativeSystemAudioListeners: () => {
+    ipcRenderer.removeAllListeners('native-system-audio-samples');
+    ipcRenderer.removeAllListeners('native-system-audio-event');
+  },
   onASRResult: (callback) => {
     ipcRenderer.on('asr-result', (event, data) => callback(data));
   },

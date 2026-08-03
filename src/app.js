@@ -21,9 +21,14 @@ class ExpressionTrainer {
     this.micActivityThreshold = 0.02;
     this.systemAudioStream = null;
     this.systemAudioAnalyser = null;
+    this.nativeSystemAudioQueue = [];
+    this.nativeSystemAudioQueuedSamples = 0;
+    this.lastNativeSystemAudioAt = 0;
+    this.nativeSystemAudioRunning = false;
 
     this.initElements();
     this.bindEvents();
+    this.bindNativeSystemAudioEvents();
     this.loadSettingsAndMaybeAutoStart();
   }
 
@@ -88,6 +93,33 @@ class ExpressionTrainer {
     this.btnCopyText.addEventListener('click', () => this.copyOriginalText());
     this.btnSaveText.addEventListener('click', () => this.saveOriginalText());
     this.btnClear.addEventListener('click', () => this.clearAll());
+  }
+
+  bindNativeSystemAudioEvents() {
+    window.api.onNativeSystemAudioSamples((data) => {
+      const samples = new Float32Array(data.samples || []);
+      if (!samples.length) return;
+
+      this.enqueueNativeSystemAudio(samples);
+      if (this.calculateRMS(samples) >= this.micActivityThreshold) {
+        this.lastNativeSystemAudioAt = Date.now();
+        this.updateMeetingActivityState({ hasInput: true, hasOutput: true });
+      }
+    });
+
+    window.api.onNativeSystemAudioEvent((event) => {
+      if (!event?.event) return;
+
+      if (event.event === 'started') {
+        this.nativeSystemAudioRunning = true;
+        this.addFeedbackItem('Native 系统音频已启动', 'good');
+      } else if (event.event === 'permission_required') {
+        this.nativeSystemAudioRunning = false;
+        this.addFeedbackItem('Native 系统音频需要屏幕与系统音频录制权限', 'filler');
+      } else if (event.event === 'exit') {
+        this.nativeSystemAudioRunning = false;
+      }
+    });
   }
 
   async loadSettingsAndMaybeAutoStart() {
@@ -156,10 +188,55 @@ class ExpressionTrainer {
 
   async updateMeetingActivityFromSamples(samples, { hasOutput = false } = {}) {
     const rms = this.calculateRMS(samples);
+    const nativeOutputActive = Date.now() - this.lastNativeSystemAudioAt < 1500;
     await this.updateMeetingActivityState({
-      hasInput: rms >= this.micActivityThreshold || hasOutput,
-      hasOutput
+      hasInput: rms >= this.micActivityThreshold || hasOutput || nativeOutputActive,
+      hasOutput: hasOutput || nativeOutputActive
     });
+  }
+
+  enqueueNativeSystemAudio(samples) {
+    this.nativeSystemAudioQueue.push(samples);
+    this.nativeSystemAudioQueuedSamples += samples.length;
+
+    const maxQueuedSamples = 16000 * 30;
+    while (this.nativeSystemAudioQueuedSamples > maxQueuedSamples && this.nativeSystemAudioQueue.length > 0) {
+      const dropped = this.nativeSystemAudioQueue.shift();
+      this.nativeSystemAudioQueuedSamples -= dropped.length;
+    }
+  }
+
+  consumeNativeSystemAudioSamples(length) {
+    const output = new Float32Array(length);
+    let offset = 0;
+
+    while (offset < length && this.nativeSystemAudioQueue.length > 0) {
+      const chunk = this.nativeSystemAudioQueue[0];
+      const take = Math.min(length - offset, chunk.length);
+      output.set(chunk.subarray(0, take), offset);
+      offset += take;
+
+      if (take === chunk.length) {
+        this.nativeSystemAudioQueue.shift();
+      } else {
+        this.nativeSystemAudioQueue[0] = chunk.subarray(take);
+      }
+      this.nativeSystemAudioQueuedSamples -= take;
+    }
+
+    return output;
+  }
+
+  mixNativeSystemAudio(samples) {
+    if (!this.nativeSystemAudioQueuedSamples) return samples;
+
+    const systemSamples = this.consumeNativeSystemAudioSamples(samples.length);
+    const mixed = new Float32Array(samples.length);
+    for (let i = 0; i < samples.length; i++) {
+      const value = (samples[i] * 0.75) + (systemSamples[i] * 0.75);
+      mixed[i] = Math.max(-1, Math.min(1, value));
+    }
+    return mixed;
   }
 
   buildAudioConstraints(deviceId) {
@@ -203,6 +280,17 @@ class ExpressionTrainer {
   async requestSystemAudioStream(contextLabel) {
     const settings = await this.getSettings();
     if (!settings?.meeting?.captureSystemAudio) return null;
+
+    const nativeResult = await window.api.startNativeSystemAudio();
+    if (nativeResult?.success) {
+      this.nativeSystemAudioRunning = true;
+      this.addFeedbackItem(`${contextLabel}已接入 Native 系统音频`, 'good');
+      return null;
+    }
+
+    if (nativeResult?.error) {
+      this.addFeedbackItem(`${contextLabel}Native 系统音频不可用：${nativeResult.error}`, 'filler');
+    }
 
     const virtualInputStream = await this.requestVirtualSystemAudioInput(contextLabel, settings);
     if (virtualInputStream) return virtualInputStream;
@@ -297,6 +385,8 @@ class ExpressionTrainer {
     }
     await this.activityMonitor.audioContext.close();
     this.activityMonitor = null;
+    await window.api.stopNativeSystemAudio();
+    this.nativeSystemAudioRunning = false;
   }
 
   async startRecording(options = {}) {
@@ -321,7 +411,7 @@ class ExpressionTrainer {
       this.audioProcessor = this.audioContext.createScriptProcessor(4096, 1, 1);
       this.audioProcessor.onaudioprocess = async (e) => {
         if (!this.isRecording || this.isPaused) return;
-        const samples = e.inputBuffer.getChannelData(0);
+        const samples = this.mixNativeSystemAudio(e.inputBuffer.getChannelData(0));
         const systemActive = this.analyserIsActive(this.systemAudioAnalyser);
         await this.updateMeetingActivityFromSamples(samples, { hasOutput: systemActive });
         const result = await window.api.feedAudio(samples);
@@ -402,6 +492,10 @@ class ExpressionTrainer {
     if (this.mediaStream) { this.mediaStream.getTracks().forEach(t => t.stop()); this.mediaStream = null; }
     if (this.systemAudioStream) { this.systemAudioStream.getTracks().forEach(t => t.stop()); this.systemAudioStream = null; }
     this.systemAudioAnalyser = null;
+    await window.api.stopNativeSystemAudio();
+    this.nativeSystemAudioRunning = false;
+    this.nativeSystemAudioQueue = [];
+    this.nativeSystemAudioQueuedSamples = 0;
     const stopResult = await window.api.stopASR();
     this.isRecording = false;
     this.isPaused = false;

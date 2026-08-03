@@ -7,6 +7,7 @@ import ScreenCaptureKit
 struct ProbeOptions {
   var duration: TimeInterval = 10
   var outputPath: String = "/tmp/system-audio-probe.wav"
+  var streamJson = false
 }
 
 final class WavWriter {
@@ -71,34 +72,88 @@ extension Data {
 }
 
 final class SystemAudioOutput: NSObject, SCStreamOutput {
-  private let writer: WavWriter
+  private let writer: WavWriter?
+  private let streamJson: Bool
   private var lastLog = Date.distantPast
+  private var resamplerRemainder: [Float] = []
 
-  init(writer: WavWriter) {
+  init(writer: WavWriter?, streamJson: Bool = false) {
     self.writer = writer
+    self.streamJson = streamJson
   }
 
   func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
     guard type == .audio, sampleBuffer.isValid else { return }
-    guard let samples = extractMonoFloatSamples(from: sampleBuffer), !samples.isEmpty else { return }
-    writer.appendMonoFloatSamples(samples)
+    guard let extracted = extractMonoFloatSamples(from: sampleBuffer), !extracted.samples.isEmpty else { return }
+    writer?.appendMonoFloatSamples(extracted.samples)
+
+    if streamJson {
+      let resampled = resampleTo16k(samples: extracted.samples, sourceSampleRate: extracted.sampleRate)
+      if !resampled.isEmpty {
+        printSampleChunk(resampled)
+      }
+    }
 
     let now = Date()
     if now.timeIntervalSince(lastLog) >= 1 {
       lastLog = now
-      let rms = sqrt(samples.reduce(Float(0)) { $0 + $1 * $1 } / Float(samples.count))
-      print(String(format: "{\"event\":\"audio\",\"rms\":%.6f,\"samples\":%d}", rms, samples.count))
+      let rms = sqrt(extracted.samples.reduce(Float(0)) { $0 + $1 * $1 } / Float(extracted.samples.count))
+      print(String(format: "{\"event\":\"audio\",\"rms\":%.6f,\"samples\":%d}", rms, extracted.samples.count))
       fflush(stdout)
     }
   }
 
-  private func extractMonoFloatSamples(from sampleBuffer: CMSampleBuffer) -> [Float]? {
+  private func printSampleChunk(_ samples: [Float]) {
+    var data = Data(capacity: samples.count * MemoryLayout<Float>.size)
+    for sample in samples {
+      var value = sample
+      Swift.withUnsafeBytes(of: &value) { data.append(contentsOf: $0) }
+    }
+
+    let payload = data.base64EncodedString()
+    print("{\"event\":\"samples\",\"sampleRate\":16000,\"samples\":\"\(payload)\"}")
+    fflush(stdout)
+  }
+
+  private func resampleTo16k(samples: [Float], sourceSampleRate: Double) -> [Float] {
+    if sourceSampleRate <= 0 { return [] }
+    if abs(sourceSampleRate - 16_000) < 1 { return samples }
+
+    let input = resamplerRemainder + samples
+    let ratio = sourceSampleRate / 16_000
+    guard input.count > Int(ceil(ratio)) + 1 else {
+      resamplerRemainder = input
+      return []
+    }
+
+    var output: [Float] = []
+    var position = 0.0
+    while Int(position) + 1 < input.count {
+      let index = Int(position)
+      let fraction = Float(position - Double(index))
+      let sample = input[index] * (1 - fraction) + input[index + 1] * fraction
+      output.append(sample)
+      position += ratio
+    }
+
+    let consumed = max(0, Int(position))
+    if consumed < input.count {
+      resamplerRemainder = Array(input[consumed..<input.count])
+    } else {
+      resamplerRemainder = []
+    }
+
+    return output
+  }
+
+  private func extractMonoFloatSamples(from sampleBuffer: CMSampleBuffer) -> (samples: [Float], sampleRate: Double)? {
     guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
           let asbdPointer = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription) else {
       return nil
     }
 
     let asbd = asbdPointer.pointee
+    let sampleRate = asbd.mSampleRate
     let frameCount = CMSampleBufferGetNumSamples(sampleBuffer)
     guard frameCount > 0 else { return nil }
 
@@ -155,7 +210,7 @@ final class SystemAudioOutput: NSObject, SCStreamOutput {
           output[frame] = sum / Float(channels)
         }
       }
-      return output
+      return (output, sampleRate)
     }
 
     let isSignedInteger = (asbd.mFormatFlags & kAudioFormatFlagIsSignedInteger) != 0
@@ -176,7 +231,7 @@ final class SystemAudioOutput: NSObject, SCStreamOutput {
           output[frame] = sum / Float(channels)
         }
       }
-      return output
+      return (output, sampleRate)
     }
 
     return nil
@@ -200,6 +255,8 @@ func parseOptions() -> ProbeOptions {
         options.outputPath = value
         args.removeFirst()
       }
+    case "--stream-json":
+      options.streamJson = true
     default:
       break
     }
@@ -233,17 +290,23 @@ struct SystemAudioProbe {
     configuration.capturesAudio = true
     configuration.excludesCurrentProcessAudio = false
 
-    let writer = try WavWriter(path: options.outputPath)
-    let output = SystemAudioOutput(writer: writer)
+    let writer = options.streamJson ? nil : try WavWriter(path: options.outputPath)
+    let output = SystemAudioOutput(writer: writer, streamJson: options.streamJson)
     let stream = SCStream(filter: filter, configuration: configuration, delegate: nil)
     let queue = DispatchQueue(label: "system-audio-probe.audio")
     try stream.addStreamOutput(output, type: .audio, sampleHandlerQueue: queue)
 
-    print("{\"event\":\"started\",\"out\":\"\(options.outputPath)\"}")
+    print("{\"event\":\"started\",\"out\":\"\(options.outputPath)\",\"streamJson\":\(options.streamJson)}")
     try await stream.startCapture()
-    try await Task.sleep(nanoseconds: UInt64(options.duration * 1_000_000_000))
+    if options.streamJson {
+      while !Task.isCancelled {
+        try await Task.sleep(nanoseconds: 1_000_000_000)
+      }
+    } else {
+      try await Task.sleep(nanoseconds: UInt64(options.duration * 1_000_000_000))
+    }
     try await stream.stopCapture()
-    try writer.finalize()
-    print("{\"event\":\"finished\",\"out\":\"\(options.outputPath)\",\"samples\":\(writer.sampleCount)}")
+    try writer?.finalize()
+    print("{\"event\":\"finished\",\"out\":\"\(options.outputPath)\",\"samples\":\(writer?.sampleCount ?? 0)}")
   }
 }

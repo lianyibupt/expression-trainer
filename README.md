@@ -8,6 +8,7 @@
 
 - 🎤 **实时语音识别**：基于 Sherpa-ONNX，完全离线，中文优化
 - 🎙️ **会议自动转写**：支持本机麦克风录音，可配置 SenseVoice/Paraformer 离线转文字
+- 🔊 **系统输出录制**：macOS 优先使用 Native ScreenCaptureKit helper 直接捕获系统声音，无需 BlackHole；不可用时再回退到虚拟声卡/Electron loopback
 - 👂 **自动发现会议**：后台监听麦克风活跃度，连续活跃后自动开始录音，长时间无输入后进入确认
 - 🗂️ **会议产物归档**：录音结束后先确认，再保存原始对话、分析报告和元数据
 - 📝 **全屏字幕显示**：黑底大字，实时显示你说的每一句话
@@ -75,6 +76,14 @@ models/
 ```
 ### 3. 启动应用
 
+如需录制系统输出声音，先构建 macOS Native helper：
+
+```bash
+npm run build:system-audio-helper
+```
+
+第一次使用系统输出录制时，macOS 可能会要求授予屏幕录制/系统音频录制权限。开发模式下通常需要授权给启动应用的 Terminal、iTerm、Codex，或者你打包后的应用本身；授权后请完全退出并重新打开应用。
+
 ```bash
 npm start
 ```
@@ -93,9 +102,9 @@ npm start
 | 打开应用后自动开始录音 | 开启后进入主界面会自动请求麦克风并开始录音 |
 | 登录后自动启动应用 | 尽量避免忘记打开应用；应用启动后才能监听麦克风 |
 | 自动监听麦克风并发现会议 | 开启后后台监听音量，连续活跃达到阈值后开始录音 |
-| 录制系统输出声音 | 开启后会尝试通过屏幕/窗口共享捕获系统音频，并与麦克风混合转写 |
+| 录制系统输出声音 | 开启后会按 Native helper → 系统音频输入设备 → Electron loopback 的顺序捕获系统输出，并与麦克风混合转写 |
 | 麦克风输入设备 | 默认使用系统麦克风，也可指定某个输入设备 |
-| 系统音频输入设备 | 推荐选择 BlackHole 2ch / Loopback 等虚拟声卡输入 |
+| 系统音频输入设备 | Native helper 不可用时的兜底方案，可选择 BlackHole 2ch / Loopback 等虚拟声卡输入 |
 | 自动开始阈值 | 默认 60 秒，表示连续检测到麦克风输入 1 分钟后开始录音 |
 | 待确认阈值 | 默认 180 秒，表示连续无麦克风输入 3 分钟后停止录音并弹出确认 |
 | 最短录音确认时长 | 默认 120 秒，短于该时长的自动录音会当作误触忽略 |
@@ -103,9 +112,17 @@ npm start
 | 确认后保存原始对话和报告 | 开启后，你在确认框选择保存时才会创建会议目录 |
 | 确认时允许生成对话报告 | 开启后，确认框会允许保存并生成报告 |
 
-自动发现会议说明：应用必须处于运行状态才能监听麦克风。建议同时开启“登录后自动启动应用”和“自动监听麦克风并发现会议”。当前纯 Electron 版本无法稳定读取系统级“其他应用是否正在播放音频”，所以连续无麦克风输入不会直接保存或分析，只会停止当前录音并弹出确认框；代码层已经保留 `hasOutput` 条件，后续可以接 macOS CoreAudio/native helper 后变成“无麦克风且无音频输出 3 分钟后待确认”。
+自动发现会议说明：应用必须处于运行状态才能监听。建议同时开启“登录后自动启动应用”“自动监听麦克风并发现会议”和“录制系统输出声音”。在 macOS 上构建 Native helper 后，应用会同时观察麦克风输入和系统输出；会议结束时不会自动保存和生成报告，而是停止录音并弹出确认框，避免短时误触或误判直接写入文件。
 
-系统输出录制说明：最稳定的方案是使用虚拟声卡。安装 BlackHole / Loopback 后，把会议软件或系统输出路由到虚拟声卡，并在设置页的“系统音频输入设备”里选择 `BlackHole 2ch` 或对应设备。应用会把“麦克风输入设备”和“系统音频输入设备”混合送入 ASR。若没有选择虚拟输入设备，应用才会 fallback 到 Electron display media handler 的 `audio: 'loopback'` 方案；这个 fallback 在 macOS 上兼容性较弱，可能仍然拿不到音频轨道。
+系统输出录制说明：当前首选方案是仓库内的 macOS Native helper，它基于 ScreenCaptureKit 直接捕获系统输出声音，并通过 JSON PCM 流送回 Electron 与麦克风混合后进入 ASR。开启“录制系统输出声音”后，如果看到“已接入 Native 系统音频”或“Native 系统音频已启动”，说明已走原生通道。若 helper 未构建、未授权或启动失败，应用会继续尝试设置页选择的 BlackHole / Loopback 等虚拟输入设备；再失败才会尝试 Electron display media handler 的 `audio: 'loopback'` 方案。
+
+可单独验证 Native helper：
+
+```bash
+npm run probe:system-audio
+```
+
+播放一段系统声音后，确认 `/tmp/system-audio-probe.wav` 能听到系统输出即可。即使终端里某些 RMS 行显示为 0，只要最终 wav 文件有系统声音，就说明捕获链路可用。
 
 推荐配置：
 
@@ -152,6 +169,7 @@ Documents/Expression Trainer Meetings/
 ┌─────────────────────────────────────────┐
 │ Electron 主进程                          │
 │  ├── SenseVoice / Sherpa-ONNX (离线语音识别) │
+│  ├── macOS Native helper (系统输出音频)       │
 │  ├── 词库匹配 (emotion-lexicon.json)     │
 │  ├── 会议产物归档 (transcript/report)     │
 │  └── AI反馈 (多后端 HTTP API)            │
@@ -181,6 +199,12 @@ Documents/Expression Trainer Meetings/
 # 开发模式（带DevTools）
 npm run dev
 
+# 构建 macOS 系统音频 Native helper
+npm run build:system-audio-helper
+
+# 录制 10 秒系统输出到 /tmp/system-audio-probe.wav，用于验证权限和捕获链路
+npm run probe:system-audio
+
 # 目录结构
 ├── main.js              # Electron主进程
 ├── preload.js           # preload脚本
@@ -196,6 +220,8 @@ npm run dev
 │   ├── ai-feedback.js   # AI反馈
 │   ├── meeting-session.js # 会议原文/报告归档
 │   └── prompts.js       # Prompt模板
+├── native/
+│   └── system-audio-helper/ # macOS ScreenCaptureKit 系统音频 helper
 ├── data/
 │   └── emotion-lexicon.json
 └── models/              # Sherpa-ONNX模型（需下载）

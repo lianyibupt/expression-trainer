@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, session, Menu, desktopCapturer } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { spawn } = require('child_process');
 const { initASR, feedAudio, stopRecognition } = require('./lib/asr');
 const { loadLexicon, analyzeText } = require('./lib/lexicon');
 const { sendFeedback, sendReport, testConnection } = require('./lib/ai-feedback');
@@ -22,6 +23,7 @@ let settingsWindow;
 let promptEditorWindow;
 let asrReady = false;
 let displayMediaHandlerReady = false;
+let nativeSystemAudioProcess = null;
 const meetingActivityDetector = new MeetingActivityDetector();
 
 // Custom prompt 文件路径
@@ -147,6 +149,124 @@ function getCurrentProviderSettings(settings) {
 
 function getMeetingOutputDir(settings) {
   return settings.meeting?.outputDir || path.join(app.getPath('documents'), 'Expression Trainer Meetings');
+}
+
+function getNativeSystemAudioHelperPath() {
+  return path.join(__dirname, 'native', 'system-audio-helper', '.build', 'debug', 'system-audio-probe');
+}
+
+function decodeFloat32Base64(base64) {
+  const buffer = Buffer.from(base64, 'base64');
+  const samples = new Array(Math.floor(buffer.length / 4));
+  for (let i = 0; i < samples.length; i++) {
+    samples[i] = buffer.readFloatLE(i * 4);
+  }
+  return samples;
+}
+
+function stopNativeSystemAudio() {
+  if (!nativeSystemAudioProcess) return;
+
+  nativeSystemAudioProcess.kill('SIGTERM');
+  nativeSystemAudioProcess = null;
+}
+
+function startNativeSystemAudio() {
+  if (nativeSystemAudioProcess) {
+    return { success: true, alreadyRunning: true };
+  }
+
+  const helperPath = getNativeSystemAudioHelperPath();
+  if (!fs.existsSync(helperPath)) {
+    return {
+      success: false,
+      error: `系统音频 helper 尚未构建: ${helperPath}。请先运行 npm run build:system-audio-helper`
+    };
+  }
+
+  let child;
+  try {
+    child = spawn(helperPath, ['--stream-json'], {
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+  nativeSystemAudioProcess = child;
+
+  let stdoutBuffer = '';
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const settle = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(startupTimer);
+      resolve(result);
+    };
+
+    const startupTimer = setTimeout(() => {
+      settle({ success: true, helperPath, startupTimedOut: true });
+    }, 3000);
+
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', chunk => {
+      stdoutBuffer += chunk;
+      const lines = stdoutBuffer.split('\n');
+      stdoutBuffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        try {
+          const event = JSON.parse(trimmed);
+          if (event.event === 'samples' && event.samples && mainWindow) {
+            mainWindow.webContents.send('native-system-audio-samples', {
+              sampleRate: event.sampleRate || 16000,
+              samples: decodeFloat32Base64(event.samples)
+            });
+          } else {
+            if (event.event === 'started') {
+              settle({ success: true, helperPath });
+            } else if (event.event === 'permission_required') {
+              settle({
+                success: false,
+                error: event.message || 'Native 系统音频需要屏幕与系统音频录制权限'
+              });
+            }
+            if (mainWindow) {
+              mainWindow.webContents.send('native-system-audio-event', event);
+            }
+          }
+        } catch (error) {
+          console.error('[NativeSystemAudio] 无法解析 helper 输出:', trimmed, error);
+        }
+      }
+    });
+
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', chunk => {
+      console.error('[NativeSystemAudio]', chunk.trim());
+    });
+
+    child.on('error', (error) => {
+      if (nativeSystemAudioProcess === child) {
+        nativeSystemAudioProcess = null;
+      }
+      settle({ success: false, error: error.message });
+    });
+
+    child.on('exit', (code, signal) => {
+      if (nativeSystemAudioProcess === child) {
+        nativeSystemAudioProcess = null;
+      }
+      settle({ success: false, error: `Native 系统音频 helper 已退出: code=${code}, signal=${signal}` });
+      if (mainWindow) {
+        mainWindow.webContents.send('native-system-audio-event', { event: 'exit', code, signal });
+      }
+    });
+  });
 }
 
 function setupDisplayMediaHandler() {
@@ -299,9 +419,14 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  stopNativeSystemAudio();
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+app.on('before-quit', () => {
+  stopNativeSystemAudio();
 });
 
 // IPC Handlers
@@ -394,8 +519,19 @@ ipcMain.handle('mark-meeting-recording-stopped', () => {
 ipcMain.handle('get-system-audio-status', () => {
   return {
     displayMediaHandlerReady,
+    nativeHelperBuilt: fs.existsSync(getNativeSystemAudioHelperPath()),
+    nativeHelperRunning: Boolean(nativeSystemAudioProcess),
     platform: process.platform
   };
+});
+
+ipcMain.handle('start-native-system-audio', () => {
+  return startNativeSystemAudio();
+});
+
+ipcMain.handle('stop-native-system-audio', () => {
+  stopNativeSystemAudio();
+  return { success: true };
 });
 
 // LLM 连通性测试
