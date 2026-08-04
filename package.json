@@ -1,13 +1,14 @@
 {
   "name": "expression-trainer",
-  "productName": "宇宙无敌表达训练",
+  "productName": "智能表达训练",
   "version": "1.0.0",
-  "description": "宇宙无敌表达训练系统 - 本地桌面版",
+  "description": "智能表达训练系统 - 本地桌面版",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
     "test": "node --test test/*.test.js",
+    "check:qwen3-asr": "QWEN3_ASR_PYTHON=.venv-qwen3-asr/bin/python .venv-qwen3-asr/bin/python scripts/qwen3_asr_worker.py --model Qwen/Qwen3-ASR-1.7B --check",
     "build:system-audio-helper": "cd native/system-audio-helper && CLANG_MODULE_CACHE_PATH=$(pwd)/.build/clang-module-cache swift build --cache-path $(pwd)/.build/swiftpm-cache",
     "probe:system-audio": "cd native/system-audio-helper && .build/debug/system-audio-probe --duration 10 --out /tmp/system-audio-probe.wav"
   },

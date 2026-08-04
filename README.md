@@ -1,4 +1,4 @@
-# 🚀 宇宙无敌表达训练系统 - 本地桌面版
+# 🚀 智能表达训练系统 - 本地桌面版
 
 > 👉 **在线版已上线：[exprtrain.online](https://exprtrain.online)**，无需安装，打开浏览器即用。支持中英双语。
 
@@ -68,15 +68,15 @@ tar xvf sherpa-onnx-streaming-paraformer-bilingual-zh-en.tar.bz2
 # https://huggingface.co/csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en
 ```
 
-使用 Qwen3-ASR 最终稿时，需要单独准备 Python 环境。建议使用独立环境，避免和桌面应用的 Node 依赖混在一起：
+使用 Qwen3-ASR 最终稿时，需要 Python `qwen-asr` 环境。当前项目推荐使用仓库内隔离环境 `.venv-qwen3-asr`：
 
 ```bash
-conda create -n qwen3-asr python=3.12 -y
-conda activate qwen3-asr
-pip install -U qwen-asr
+python3 -m venv .venv-qwen3-asr
+PIP_CACHE_DIR=$(pwd)/.pip-cache .venv-qwen3-asr/bin/python -m pip install -U pip qwen-asr
+npm run check:qwen3-asr
 ```
 
-如果应用不是从这个 conda 环境启动，可以在启动前指定 Python 路径：
+应用会优先使用 `.venv-qwen3-asr/bin/python`。如果你想使用其它 Python 环境，可以在启动前指定：
 
 ```bash
 export QWEN3_ASR_PYTHON=/path/to/qwen3-asr/bin/python
@@ -115,7 +115,7 @@ npm start
 
 | 选项 | 说明 |
 |------|------|
-| 本地识别模型 | 默认 SenseVoice Small int8；也可切换 Paraformer 流式识别或自定义 SenseVoice |
+| 本地识别模型 | 默认 Paraformer 实时 + Qwen3-ASR 最终稿；也可切换纯 Paraformer、SenseVoice 或纯 Qwen3-ASR |
 | Qwen3-ASR 模型路径或模型 ID | 选择“Paraformer 实时 + Qwen3-ASR 最终稿”或“Qwen3-ASR”时显示；留空使用 `Qwen/Qwen3-ASR-1.7B` |
 | 自定义 SenseVoice 模型目录 | 仅在选择自定义预设时填写，必须是 sherpa-onnx 兼容导出 |
 | 会议文件保存目录 | 留空时保存到 `Documents/Expression Trainer Meetings` |

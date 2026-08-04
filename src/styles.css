@@ -233,7 +233,7 @@ button, input, select, .subtitle-scroll, .feedback-content, .modal-body {
 .btn-clear { background: #222; color: #888; border: 1px solid #333; }
 .btn-clear:hover { background: #333; color: #ff6b6b; border-color: #ff6b6b; }
 
-/* ===== 少女icon ===== */
+/* ===== icon ===== */
 .girl-icon {
   position: fixed;
   bottom: 16px; right: 16px;

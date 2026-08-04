@@ -16,7 +16,7 @@ app.commandLine.appendSwitch('enable-features', [
 ].join(','));
 
 // 覆盖应用显示名称（菜单栏、Dock、任务栏、窗口标题）
-app.setName('宇宙无敌表达训练');
+app.setName('智能表达训练');
 
 let mainWindow;
 let settingsWindow;
@@ -52,9 +52,10 @@ const DEFAULT_PROVIDER_CONFIGS = {
 };
 
 const DEFAULT_ASR_CONFIG = {
-  modelPreset: 'sensevoice-int8',
-  engine: 'sensevoice',
+  modelPreset: 'paraformer-qwen3-final',
+  engine: 'hybrid',
   modelPath: '',
+  qwen3ModelPath: '',
   language: 'zh'
 };
 
@@ -300,7 +301,7 @@ function createMainWindow() {
     width: 1200,
     height: 800,
     backgroundColor: '#000000',
-    title: '宇宙无敌表达训练',
+    title: '智能表达训练',
     titleBarStyle: 'hiddenInset',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -494,10 +495,20 @@ ipcMain.handle('feed-audio', (event, samplesPayload) => {
   return result; // { text, isFinal } or null
 });
 
-ipcMain.handle('stop-asr', async () => {
-  const finalText = await stopRecognition();
+ipcMain.handle('stop-asr', async (event) => {
+  const sender = event.sender;
+  const result = await stopRecognition({
+    onFinalResult: (payload) => {
+      if (!sender.isDestroyed()) {
+        sender.send('asr-final-result', payload);
+      }
+    }
+  });
   asrReady = false;
-  return { success: true, finalText };
+  if (typeof result === 'string') {
+    return { success: true, finalText: result };
+  }
+  return { success: true, ...result };
 });
 
 ipcMain.handle('update-meeting-activity', (event, { hasInput, hasOutput, nowMs }) => {

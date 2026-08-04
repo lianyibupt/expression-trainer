@@ -39,8 +39,12 @@ contextBridge.exposeInMainWorld('api', {
   onASRResult: (callback) => {
     ipcRenderer.on('asr-result', (event, data) => callback(data));
   },
+  onASRFinalResult: (callback) => {
+    ipcRenderer.on('asr-final-result', (event, data) => callback(data));
+  },
   removeASRListener: () => {
     ipcRenderer.removeAllListeners('asr-result');
+    ipcRenderer.removeAllListeners('asr-final-result');
   },
 
   // 词库分析

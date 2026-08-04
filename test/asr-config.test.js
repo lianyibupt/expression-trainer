@@ -4,16 +4,15 @@ const test = require('node:test');
 
 const { buildASRConfig } = require('../lib/asr');
 
-test('buildASRConfig uses the sherpa-onnx SenseVoice int8 preset by default', () => {
+test('buildASRConfig uses the hybrid Paraformer + Qwen3-ASR preset by default', () => {
   const config = buildASRConfig({});
 
-  assert.equal(config.engine, 'sensevoice');
-  assert.equal(config.modelPreset, 'sensevoice-int8');
+  assert.equal(config.engine, 'hybrid');
+  assert.equal(config.modelPreset, 'paraformer-qwen3-final');
+  assert.equal(config.finalEngine, 'qwen3-asr-python');
+  assert.equal(config.finalModel, 'Qwen/Qwen3-ASR-1.7B');
   assert.equal(config.sampleRate, 16000);
-  assert.equal(config.recognizerConfig.modelConfig.senseVoice.model.endsWith('model.int8.onnx'), true);
-  assert.equal(config.recognizerConfig.modelConfig.tokens.endsWith('tokens.txt'), true);
-  assert.equal(config.recognizerConfig.modelConfig.senseVoice.language, 'zh');
-  assert.equal(config.recognizerConfig.modelConfig.senseVoice.useInverseTextNormalization, 1);
+  assert.equal(config.recognizerConfig.modelConfig.paraformer.encoder.endsWith('encoder.int8.onnx'), true);
 });
 
 test('buildASRConfig keeps the existing streaming paraformer as a selectable preset', () => {
@@ -25,9 +24,9 @@ test('buildASRConfig keeps the existing streaming paraformer as a selectable pre
   assert.equal(config.recognizerConfig.modelConfig.paraformer.decoder.endsWith('decoder.int8.onnx'), true);
   assert.equal(config.recognizerConfig.modelConfig.numThreads, 4);
   assert.equal(config.recognizerConfig.enableEndpoint, true);
-  assert.equal(config.recognizerConfig.rule1MinTrailingSilence, 0.8);
-  assert.equal(config.recognizerConfig.rule2MinTrailingSilence, 0.4);
-  assert.equal(config.recognizerConfig.rule3MinUtteranceLength, 8);
+  assert.equal(config.recognizerConfig.rule1MinTrailingSilence, 1.2);
+  assert.equal(config.recognizerConfig.rule2MinTrailingSilence, 0.8);
+  assert.equal(config.recognizerConfig.rule3MinUtteranceLength, 14);
 });
 
 test('buildASRConfig supports hybrid Paraformer realtime plus Qwen3-ASR final transcription', () => {

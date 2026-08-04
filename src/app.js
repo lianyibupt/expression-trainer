@@ -1,4 +1,4 @@
-// 宇宙无敌表达训练系统 V2
+// 智能表达训练系统 V2
 
 class ExpressionTrainer {
   constructor() {
@@ -26,10 +26,14 @@ class ExpressionTrainer {
     this.lastNativeSystemAudioAt = 0;
     this.nativeSystemAudioRunning = false;
     this.lastAsrPerfLogAt = 0;
+    this.awaitingFinalTranscript = false;
+    this.realtimePhraseBuffer = '';
+    this.realtimePhraseLastAt = 0;
 
     this.initElements();
     this.bindEvents();
     this.bindNativeSystemAudioEvents();
+    this.bindASRFinalEvents();
     this.loadSettingsAndMaybeAutoStart();
   }
 
@@ -119,6 +123,30 @@ class ExpressionTrainer {
         this.addFeedbackItem('Native 系统音频需要屏幕与系统音频录制权限', 'filler');
       } else if (event.event === 'exit') {
         this.nativeSystemAudioRunning = false;
+      }
+    });
+  }
+
+  bindASRFinalEvents() {
+    window.api.onASRFinalResult(async (result) => {
+      if (!this.awaitingFinalTranscript) return;
+
+      if (result?.finalTextError) {
+        this.awaitingFinalTranscript = false;
+        this.addFeedbackItem(result.finalTextError, 'filler');
+        return;
+      }
+
+      if (result?.finalText) {
+        const duration = this.stats.duration || 0;
+        await this.loadTranscriptText(result.finalText, { duration, requestFeedback: false });
+        this.awaitingFinalTranscript = false;
+        this.addFeedbackItem('Qwen3-ASR 最终稿已生成', 'good');
+        this.btnReport.classList.remove('hidden');
+        this.btnCopyText.classList.remove('hidden');
+        this.btnSaveText.classList.remove('hidden');
+        this.btnClear.classList.remove('hidden');
+        this.showReviewModal();
       }
     });
   }
@@ -462,6 +490,8 @@ class ExpressionTrainer {
     this.fullText = '';
     this.sentences = [];
     this.meetingSession = null;
+    this.realtimePhraseBuffer = '';
+    this.realtimePhraseLastAt = 0;
     this.resetStats();
     this.subtitleContainer.innerHTML = '';
 
@@ -507,6 +537,7 @@ class ExpressionTrainer {
     this.nativeSystemAudioRunning = false;
     this.nativeSystemAudioQueue = [];
     this.nativeSystemAudioQueuedSamples = 0;
+    await this.flushRealtimePhraseBuffer();
     const stopResult = await window.api.stopASR();
     this.isRecording = false;
     this.isPaused = false;
@@ -518,8 +549,20 @@ class ExpressionTrainer {
     const duration = Math.floor((Date.now() - this.startTime - totalPaused) / 1000);
     this.stats.duration = duration;
 
+    if (stopResult?.finalTextError) {
+      this.addFeedbackItem(stopResult.finalTextError, 'filler');
+    }
+
+    if (stopResult?.finalTextPending) {
+      this.awaitingFinalTranscript = true;
+      this.addFeedbackItem('Qwen3-ASR 正在后台生成最终稿', 'ai');
+    }
+
     if (stopResult?.finalText) {
       await this.loadTranscriptText(stopResult.finalText, { duration, requestFeedback: false });
+      if (stopResult.finalTextSource === 'qwen3-asr') {
+        this.addFeedbackItem('Qwen3-ASR 最终稿已生成', 'good');
+      }
     }
 
     // UI：显示生成报告按钮，可翻阅字幕
@@ -581,11 +624,48 @@ class ExpressionTrainer {
 
   discardCurrentRecording() {
     this.reviewModal.classList.add('hidden');
+    this.awaitingFinalTranscript = false;
     this.clearAll();
     this.addFeedbackItem('录音已丢弃', 'filler');
   }
 
   // ===== ASR结果处理 =====
+
+  normalizeRealtimeFragment(text) {
+    return String(text || '').replace(/\s+/g, ' ').trim();
+  }
+
+  mergeRealtimeFragment(base, fragment) {
+    if (!base) return fragment;
+    if (!fragment) return base;
+
+    const needsSpace = /[A-Za-z0-9]$/.test(base) && /^[A-Za-z0-9]/.test(fragment);
+    return `${base}${needsSpace ? ' ' : ''}${fragment}`;
+  }
+
+  shouldFlushRealtimePhrase(text, gapMs) {
+    if (!text) return false;
+    if (/[。！？!?；;：:]$/.test(text)) return true;
+    if (text.length >= 28) return true;
+    return gapMs >= 2200 && text.length >= 12;
+  }
+
+  async flushRealtimePhraseBuffer() {
+    const text = this.realtimePhraseBuffer.trim();
+    if (!text) return;
+
+    this.realtimePhraseBuffer = '';
+    this.realtimePhraseLastAt = 0;
+    this.sentences.push(text);
+    this.fullText += `${this.fullText ? '\n' : ''}${text}`;
+    this.analyzeCurrentSentence(text);
+
+    if (this.fullText.length - this.lastFeedbackText.length >= 30) {
+      this.requestRealtimeFeedback();
+    }
+
+    this.renderSubtitle(text, true);
+  }
 
   handleASRResult({ text, isFinal, asrMs, mode }) {
     if (asrMs != null && Date.now() - this.lastAsrPerfLogAt > 5000) {
@@ -593,17 +673,25 @@ class ExpressionTrainer {
       console.debug(`[ASR] mode=${mode || 'unknown'} chunkDecode=${asrMs}ms textLength=${text.length}`);
     }
 
-    if (isFinal) {
-      this.sentences.push(text);
-      this.fullText += text;
-      this.analyzeCurrentSentence(text);
+    const fragment = this.normalizeRealtimeFragment(text);
+    if (!fragment) return;
 
-      // 每30字触发一次AI反馈（语境化精准词建议）
-      if (this.fullText.length - this.lastFeedbackText.length >= 30) {
-        this.requestRealtimeFeedback();
+    if (isFinal) {
+      const now = Date.now();
+      const gapMs = this.realtimePhraseLastAt ? now - this.realtimePhraseLastAt : 0;
+      this.realtimePhraseBuffer = this.mergeRealtimeFragment(this.realtimePhraseBuffer, fragment);
+      this.realtimePhraseLastAt = now;
+
+      if (this.shouldFlushRealtimePhrase(this.realtimePhraseBuffer, gapMs)) {
+        this.flushRealtimePhraseBuffer();
+      } else {
+        this.renderSubtitle(this.realtimePhraseBuffer, false);
       }
+      return;
     }
-    this.renderSubtitle(text, isFinal);
+
+    const preview = this.mergeRealtimeFragment(this.realtimePhraseBuffer, fragment);
+    this.renderSubtitle(preview, false);
   }
 
   renderSubtitle(currentText, isFinal) {
@@ -921,6 +1009,7 @@ class ExpressionTrainer {
   }
 
   clearAll() {
+    this.awaitingFinalTranscript = false;
     this.fullText = '';
     this.sentences = [];
     this.lastReport = '';

@@ -18,11 +18,12 @@ import sys
 def parse_args():
     parser = argparse.ArgumentParser(description="Qwen3-ASR transcription worker")
     parser.add_argument("--model", required=True, help="Local model path or HuggingFace model id")
-    parser.add_argument("--audio", required=True, help="Local wav file path")
+    parser.add_argument("--audio", help="Local wav file path")
     parser.add_argument("--language", default="Chinese", help="Language hint, or auto/none")
     parser.add_argument("--device-map", default=os.environ.get("QWEN3_ASR_DEVICE_MAP", "auto"))
     parser.add_argument("--max-new-tokens", type=int, default=int(os.environ.get("QWEN3_ASR_MAX_NEW_TOKENS", "4096")))
     parser.add_argument("--batch-size", type=int, default=int(os.environ.get("QWEN3_ASR_BATCH_SIZE", "1")))
+    parser.add_argument("--check", action="store_true", help="Only check Python dependencies")
     return parser.parse_args()
 
 
@@ -38,6 +39,18 @@ def main():
             f"Original error: {exc}",
             file=sys.stderr,
         )
+        return 2
+
+    if args.check:
+        print(json.dumps({
+            "ok": True,
+            "torch": getattr(torch, "__version__", "unknown"),
+            "cuda": bool(torch.cuda.is_available()),
+        }, ensure_ascii=False))
+        return 0
+
+    if not args.audio:
+        print("--audio is required unless --check is used", file=sys.stderr)
         return 2
 
     language = args.language

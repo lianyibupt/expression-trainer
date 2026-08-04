@@ -1,4 +1,6 @@
 node_modules/
+.venv-qwen3-asr/
+.pip-cache/
 models/
 models/sherpa-onnx-*/
 dist/
