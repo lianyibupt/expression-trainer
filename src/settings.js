@@ -63,6 +63,7 @@ class SettingsPage {
     this.asrModelHint = document.getElementById('asr-model-hint');
     this.sensevoiceModelPathInput = document.getElementById('sensevoice-model-path');
     this.qwen3ModelPathInput = document.getElementById('qwen3-model-path');
+    this.speakerDiarizationInput = document.getElementById('speaker-diarization');
     this.meetingOutputDirInput = document.getElementById('meeting-output-dir');
     this.autoStartRecordingInput = document.getElementById('auto-start-recording');
     this.launchAtLoginInput = document.getElementById('launch-at-login');
@@ -78,6 +79,8 @@ class SettingsPage {
     this.autoSaveArtifactsInput = document.getElementById('auto-save-artifacts');
     this.autoGenerateReportInput = document.getElementById('auto-generate-report');
     this.btnSave = document.getElementById('btn-save');
+    this.btnBack = document.getElementById('btn-back');
+    this.btnCancel = document.getElementById('btn-cancel');
     this.saveSuccess = document.getElementById('save-success');
 
     this.groupApikey = document.getElementById('group-apikey');
@@ -96,6 +99,16 @@ class SettingsPage {
     this.asrModelPresetSelect.addEventListener('change', () => this.onASRModelChange());
     this.btnRefreshAudioDevices.addEventListener('click', () => this.loadAudioDevices({ requestPermission: true }));
     this.btnSave.addEventListener('click', () => this.save());
+    this.btnBack.addEventListener('click', () => this.closeWithoutSaving());
+    this.btnCancel.addEventListener('click', () => this.closeWithoutSaving());
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') this.closeWithoutSaving();
+    });
+  }
+
+  closeWithoutSaving() {
+    if (this.btnSave.classList.contains('loading')) return;
+    window.api.closeWindow();
   }
 
   async loadSettings() {
@@ -118,6 +131,7 @@ class SettingsPage {
     this.asrModelPresetSelect.value = modelPreset;
     this.sensevoiceModelPathInput.value = asr.modelPath || '';
     this.qwen3ModelPathInput.value = asr.qwen3ModelPath || '';
+    this.speakerDiarizationInput.checked = asr.speakerDiarization !== false;
     this.meetingOutputDirInput.value = meeting.outputDir || '';
     this.autoStartRecordingInput.checked = Boolean(meeting.autoStartRecording);
     this.launchAtLoginInput.checked = Boolean(meeting.launchAtLogin);
@@ -278,6 +292,7 @@ class SettingsPage {
       engine: ASR_ENGINE_BY_PRESET[this.asrModelPresetSelect.value] || 'sensevoice',
       modelPath: this.asrModelPresetSelect.value === 'sensevoice-custom' ? this.sensevoiceModelPathInput.value.trim() : '',
       qwen3ModelPath: this.qwen3ModelPathInput.value.trim(),
+      speakerDiarization: this.speakerDiarizationInput.checked,
       language: 'zh'
     };
 

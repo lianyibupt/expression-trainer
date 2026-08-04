@@ -3,161 +3,183 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能表达训练系统</title>
+  <title>智能表达训练</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <!-- 洋红闪烁边框 -->
-  <div class="glow-border"></div>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand-block">
+        <span class="app-kicker">Expression Trainer</span>
+        <h1 class="app-title">智能表达训练</h1>
+      </div>
+      <div class="topbar-right">
+        <span id="timer" class="timer">00:00</span>
+        <button id="btn-prompt-editor" class="icon-button" title="训练规则" aria-label="训练规则">🎯</button>
+        <button id="btn-settings" class="icon-button" title="设置" aria-label="设置">⚙️</button>
+      </div>
+    </header>
 
-  <!-- 主布局：三列 -->
-  <div class="layout">
-    <!-- 左栏：表达分析 -->
-    <aside class="panel-left">
-      <div class="panel-title">📊 表达分析</div>
-      <div class="stat-row">
-        <span class="stat-label">笼统词</span>
-        <span id="stat-vague" class="stat-value stat-red">0</span>
-      </div>
-      <div class="stat-row">
-        <span class="stat-label">填充词</span>
-        <span id="stat-fillers" class="stat-value stat-orange">0</span>
-      </div>
-      <div class="stat-row">
-        <span class="stat-label">犹豫词</span>
-        <span id="stat-hedges" class="stat-value stat-yellow">0</span>
-      </div>
-      <div class="stat-row">
-        <span class="stat-label">表达密度</span>
-        <span id="stat-density" class="stat-value stat-green">--</span>
-      </div>
-    </aside>
+    <div class="workbench">
+      <aside class="stage-rail" aria-label="功能阶段">
+        <button class="stage-tab active" data-stage="live">
+          <span class="stage-index">01</span>
+          <span class="stage-label">实时字幕</span>
+        </button>
+        <button class="stage-tab" data-stage="transcript">
+          <span class="stage-index">02</span>
+          <span class="stage-label">会议原文</span>
+        </button>
+        <button class="stage-tab" data-stage="optimize">
+          <span class="stage-index">03</span>
+          <span class="stage-label">表达优化</span>
+        </button>
+        <button class="stage-tab" data-stage="report">
+          <span class="stage-index">04</span>
+          <span class="stage-label">报告</span>
+        </button>
 
-    <!-- 中间：主内容区 -->
-    <main class="main-area">
-      <!-- 顶部栏 -->
-      <div class="topbar">
-        <span class="app-title">智能表达训练系统</span>
-        <div class="topbar-right">
-          <span id="timer" class="timer">00:00</span>
-          <button id="btn-prompt-editor" class="btn-icon" title="训练规则">🎯</button>
-          <button id="btn-settings" class="btn-icon" title="设置">⚙️</button>
+        <div class="rail-status">
+          <span class="rail-status-label">当前状态</span>
+          <strong id="session-status">待开始</strong>
         </div>
-      </div>
+      </aside>
 
-      <!-- 字幕区顶部工具栏 -->
-      <div class="subtitle-topbar">
-        <button id="btn-paste" class="btn-sm btn-paste-top">
-          <span>📋</span> 粘贴逐字稿
-        </button>
-        <div class="subtitle-topbar-right">
-          <button id="btn-copy-text" class="btn-sm hidden" title="复制原文">📋 复制</button>
-          <button id="btn-save-text" class="btn-sm hidden" title="保存原文">💾 保存</button>
-          <button id="btn-clear" class="btn-sm hidden" title="清空">🗑️ 清空</button>
-        </div>
-      </div>
+      <main class="stage-area">
+        <section class="stage-panel active" data-panel="live">
+          <div class="panel-heading">
+            <div>
+              <p class="panel-eyebrow">Live Caption</p>
+              <h2>实时字幕</h2>
+            </div>
+            <div class="stage-actions">
+              <button id="btn-paste" class="btn-sm">粘贴原文</button>
+            </div>
+          </div>
 
-      <!-- 字幕滚动区 -->
-      <div id="subtitle-scroll" class="subtitle-scroll">
-        <div id="subtitle-container" class="subtitle-container">
-          <div class="subtitle-line hint">点击下方按钮开始说话</div>
-        </div>
-      </div>
+          <div id="subtitle-scroll" class="subtitle-scroll">
+            <div id="subtitle-container" class="subtitle-container">
+              <div class="subtitle-line hint">点击下方按钮开始说话</div>
+            </div>
+          </div>
 
-      <!-- 底部按钮（只保留核心操作） -->
-      <div class="action-bar">
-        <button id="btn-start" class="btn-main btn-start">
-          <span class="btn-icon-inner">🎤</span>
-          <span class="btn-label">开始录制</span>
-        </button>
-        <button id="btn-pause" class="btn-main btn-pause hidden">
-          <span class="btn-icon-inner">⏸️</span>
-          <span class="btn-label">暂停</span>
-        </button>
-        <button id="btn-resume" class="btn-main btn-resume hidden">
-          <span class="btn-icon-inner">▶️</span>
-          <span class="btn-label">继续</span>
-        </button>
-        <button id="btn-stop" class="btn-main btn-stop hidden">
-          <span class="btn-icon-inner">⏹️</span>
-          <span class="btn-label">结束</span>
-        </button>
-        <button id="btn-report" class="btn-main btn-report hidden">
-          <span class="btn-icon-inner">📋</span>
-          <span class="btn-label">生成报告</span>
-        </button>
-      </div>
-    </main>
+          <div class="action-bar">
+            <button id="btn-start" class="btn-main btn-start">
+              <span class="btn-icon-inner">🎤</span>
+              <span class="btn-label">开始录制</span>
+            </button>
+            <button id="btn-pause" class="btn-main btn-pause hidden">
+              <span class="btn-icon-inner">⏸</span>
+              <span class="btn-label">暂停</span>
+            </button>
+            <button id="btn-resume" class="btn-main btn-resume hidden">
+              <span class="btn-icon-inner">▶</span>
+              <span class="btn-label">继续</span>
+            </button>
+            <button id="btn-stop" class="btn-main btn-stop hidden">
+              <span class="btn-icon-inner">⏹</span>
+              <span class="btn-label">结束</span>
+            </button>
+          </div>
+        </section>
 
-    <!-- 右栏：实时反馈 -->
-    <aside class="panel-right">
-      <div class="panel-title">💡 实时反馈</div>
-      <div id="feedback-content" class="feedback-content">
-        <!-- 实时反馈内容 -->
-      </div>
-    </aside>
-  </div>
+        <section class="stage-panel" data-panel="transcript">
+          <div class="panel-heading">
+            <div>
+              <p class="panel-eyebrow">Transcript</p>
+              <h2>会议原文</h2>
+            </div>
+            <div class="stage-actions">
+              <button id="btn-copy-text" class="btn-sm hidden">复制</button>
+              <button id="btn-save-text" class="btn-sm hidden">保存</button>
+              <button id="btn-clear" class="btn-sm hidden">清空</button>
+            </div>
+          </div>
 
-  <!-- 耳机DJ icon -->
-  <div class="girl-icon">
-    <svg width="44" height="44" viewBox="0 0 70 70" fill="none">
-      <path d="M16 32 Q16 14 35 12 Q54 14 54 32" stroke="#E5007E" stroke-width="2.5" fill="none"/>
-      <rect x="12" y="30" width="7" height="12" rx="3" fill="#E5007E" opacity="0.6"/>
-      <rect x="51" y="30" width="7" height="12" rx="3" fill="#E5007E" opacity="0.6"/>
-      <circle cx="35" cy="38" r="14" stroke="#E5007E" stroke-width="2" fill="none"/>
-      <path d="M28 36 Q32 33 36 36" stroke="#E5007E" stroke-width="1.5" fill="none"/>
-      <path d="M38 36 Q41 34 44 37" stroke="#E5007E" stroke-width="1.5" fill="none"/>
-      <circle cx="32" cy="35.5" r="1.2" fill="#E5007E"/>
-      <path d="M31 43 Q35 46 39 43" stroke="#E5007E" stroke-width="1.5" fill="none" stroke-linecap="round"/>
-    </svg>
-  </div>
+          <div class="editor-wrap">
+            <textarea id="transcript-editor" class="transcript-editor" placeholder="录音结束后会自动沉淀到这里，也可以直接粘贴一段会议原文进行分析。"></textarea>
+          </div>
 
-  <!-- 粘贴逐字稿弹窗 -->
-  <div id="paste-modal" class="modal hidden">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h2>📋 粘贴逐字稿</h2>
-        <button id="btn-close-paste" class="btn-close">×</button>
-      </div>
-      <div class="modal-body" style="display:flex;flex-direction:column;gap:12px;">
-        <p style="color:#888;font-size:13px;">把逐字稿粘贴进来，我帮你分析</p>
-        <textarea id="paste-textarea" placeholder="在这里粘贴文字..." style="flex:1;min-height:300px;background:#0a0a0a;border:1px solid #333;border-radius:8px;padding:16px;color:#fff;font-size:14px;line-height:1.8;resize:none;font-family:inherit;"></textarea>
-        <button id="btn-analyze-paste" style="background:#E5007E;color:#fff;border:none;border-radius:8px;padding:12px 20px;font-size:14px;cursor:pointer;align-self:flex-end;">🔍 开始分析</button>
-      </div>
+          <div class="transcript-actions">
+            <button id="btn-analyze-paste" class="btn-primary">分析当前原文</button>
+          </div>
+        </section>
+
+        <section class="stage-panel" data-panel="optimize">
+          <div class="panel-heading">
+            <div>
+              <p class="panel-eyebrow">Coaching</p>
+              <h2>表达优化</h2>
+            </div>
+          </div>
+
+          <div class="analysis-grid">
+            <div class="metrics-panel">
+              <div class="stat-row">
+                <span class="stat-label">笼统词</span>
+                <span id="stat-vague" class="stat-value stat-red">0</span>
+              </div>
+              <div class="stat-row">
+                <span class="stat-label">填充词</span>
+                <span id="stat-fillers" class="stat-value stat-orange">0</span>
+              </div>
+              <div class="stat-row">
+                <span class="stat-label">犹豫词</span>
+                <span id="stat-hedges" class="stat-value stat-yellow">0</span>
+              </div>
+              <div class="stat-row">
+                <span class="stat-label">表达密度</span>
+                <span id="stat-density" class="stat-value stat-green">--</span>
+              </div>
+            </div>
+
+            <div class="feedback-panel">
+              <div class="feedback-title">实时反馈</div>
+              <div id="feedback-content" class="feedback-content"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="stage-panel" data-panel="report">
+          <div class="panel-heading">
+            <div>
+              <p class="panel-eyebrow">Report</p>
+              <h2>表达报告</h2>
+            </div>
+            <div class="stage-actions">
+              <button id="btn-copy-report" class="btn-sm hidden">复制全文</button>
+              <button id="btn-report" class="btn-primary hidden">生成报告</button>
+            </div>
+          </div>
+
+          <div id="report-body" class="report-body">
+            <p class="empty-state">完成录制或粘贴原文后，可以在这里生成表达分析报告。</p>
+          </div>
+        </section>
+
+        <section id="review-modal" class="review-panel hidden" aria-live="polite">
+          <div>
+            <strong>确认这段录音</strong>
+            <p id="review-summary" class="review-summary"></p>
+          </div>
+          <div class="review-actions">
+            <button id="btn-review-discard" class="btn-secondary">丢弃</button>
+            <button id="btn-review-save" class="btn-secondary">保存原文</button>
+            <button id="btn-review-report" class="btn-primary">保存并生成报告</button>
+            <button id="btn-review-close" class="btn-close" aria-label="关闭">×</button>
+          </div>
+        </section>
+      </main>
     </div>
   </div>
 
-  <!-- 报告弹窗 -->
-  <div id="report-modal" class="modal hidden">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h2>📋 表达分析报告</h2>
-        <div class="modal-header-actions">
-          <button id="btn-copy-report" class="btn-sm">📋 复制全文</button>
-          <button id="btn-close-report" class="btn-close">×</button>
-        </div>
-      </div>
-      <div id="report-body" class="modal-body">
-      </div>
-    </div>
+  <div id="paste-modal" class="hidden" aria-hidden="true">
+    <textarea id="paste-textarea"></textarea>
+    <button id="btn-close-paste" type="button"></button>
   </div>
 
-  <!-- 自动录音确认弹窗 -->
-  <div id="review-modal" class="modal hidden">
-    <div class="modal-content modal-content-small">
-      <div class="modal-header">
-        <h2>确认这段录音</h2>
-        <button id="btn-review-close" class="btn-close">×</button>
-      </div>
-      <div class="modal-body">
-        <p id="review-summary" class="review-summary"></p>
-        <div class="review-actions">
-          <button id="btn-review-discard" class="btn-secondary">丢弃</button>
-          <button id="btn-review-save" class="btn-primary">保存原文</button>
-          <button id="btn-review-report" class="btn-primary">保存并生成报告</button>
-        </div>
-      </div>
-    </div>
+  <div id="report-modal" class="hidden" aria-hidden="true">
+    <button id="btn-close-report" type="button"></button>
   </div>
 
   <script src="app.js"></script>

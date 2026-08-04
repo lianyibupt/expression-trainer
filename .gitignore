@@ -1,6 +1,7 @@
 node_modules/
 .venv-qwen3-asr/
 .pip-cache/
+__pycache__/
 models/
 models/sherpa-onnx-*/
 dist/

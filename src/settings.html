@@ -8,7 +8,7 @@
   <style>
     body {
       background: #1a1a1a;
-      padding: 40px 32px 32px;
+      padding: 56px 32px 32px;
       display: block;
       overflow-y: auto;
       -webkit-app-region: drag;
@@ -21,7 +21,52 @@
     h1 {
       font-size: 20px;
       font-weight: 600;
+      margin-bottom: 8px;
+      color: #fff;
+    }
+
+    .settings-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
       margin-bottom: 24px;
+    }
+
+    .settings-header h1 {
+      margin-bottom: 0;
+    }
+
+    .settings-header-hint {
+      margin-top: 4px;
+      color: #666;
+      font-size: 12px;
+    }
+
+    .btn-back,
+    .btn-cancel {
+      border: 1px solid #444;
+      border-radius: 7px;
+      background: #242424;
+      color: #bbb;
+      cursor: pointer;
+      font-size: 13px;
+      transition: background 0.2s, border-color 0.2s, color 0.2s;
+      -webkit-app-region: no-drag;
+    }
+
+    .btn-back {
+      position: fixed;
+      top: 14px;
+      left: 18px;
+      padding: 7px 12px;
+      z-index: 2;
+    }
+
+    .btn-back:hover,
+    .btn-cancel:hover {
+      border-color: #666;
+      background: #303030;
       color: #fff;
     }
 
@@ -140,6 +185,23 @@
       pointer-events: none;
     }
 
+    .settings-footer {
+      display: flex;
+      gap: 10px;
+      margin-top: 24px;
+    }
+
+    .settings-footer .btn-save,
+    .settings-footer .btn-cancel {
+      flex: 1;
+      width: auto;
+      margin-top: 0;
+    }
+
+    .settings-footer .btn-cancel {
+      padding: 12px;
+    }
+
     .settings-section {
       margin-top: 28px;
       padding-top: 20px;
@@ -168,8 +230,15 @@
   </style>
 </head>
 <body>
+  <button type="button" class="btn-back" id="btn-back">← 返回</button>
+
   <div class="settings-container">
-    <h1>⚙️ 设置</h1>
+    <div class="settings-header">
+      <div>
+        <h1>⚙️ 设置</h1>
+        <div class="settings-header-hint">修改后点击保存；返回不会保存当前修改</div>
+      </div>
+    </div>
 
     <div class="form-group">
       <label>AI 后端</label>
@@ -237,6 +306,12 @@
         <input type="text" id="qwen3-model-path" placeholder="Qwen/Qwen3-ASR-1.7B 或 /path/to/Qwen3-ASR-1.7B">
         <div class="hint">需要本机 Python 环境安装 qwen-asr；留空使用 Qwen/Qwen3-ASR-1.7B</div>
       </div>
+
+      <label class="checkbox-row">
+        <input type="checkbox" id="speaker-diarization">
+        结束后按音色区分说话人
+      </label>
+      <div class="hint" style="margin:-5px 0 14px 28px;">录音结束后在本机对语音片段聚类，并为最终原文添加“说话人 1/2”标签；不会影响实时字幕。</div>
 
       <div class="form-group">
         <label>会议文件保存目录</label>
@@ -316,7 +391,10 @@
       <div class="save-success" id="save-success">✓ 已保存</div>
       <div class="connection-error" id="connection-error"></div>
     </div>
-    <button class="btn-save" id="btn-save">保存设置</button>
+    <div class="settings-footer">
+      <button type="button" class="btn-cancel" id="btn-cancel">取消</button>
+      <button type="button" class="btn-save" id="btn-save">保存设置</button>
+    </div>
   </div>
 
   <script src="settings.js"></script>

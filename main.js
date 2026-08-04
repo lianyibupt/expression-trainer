@@ -56,6 +56,7 @@ const DEFAULT_ASR_CONFIG = {
   engine: 'hybrid',
   modelPath: '',
   qwen3ModelPath: '',
+  speakerDiarization: true,
   language: 'zh'
 };
 

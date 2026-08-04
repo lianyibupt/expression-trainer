@@ -29,6 +29,7 @@ class ExpressionTrainer {
     this.awaitingFinalTranscript = false;
     this.realtimePhraseBuffer = '';
     this.realtimePhraseLastAt = 0;
+    this.currentStage = 'live';
 
     this.initElements();
     this.bindEvents();
@@ -60,6 +61,10 @@ class ExpressionTrainer {
     this.btnCopyReport = document.getElementById('btn-copy-report');
     this.pasteModal = document.getElementById('paste-modal');
     this.pasteTextarea = document.getElementById('paste-textarea');
+    this.transcriptEditor = document.getElementById('transcript-editor');
+    this.stageTabs = Array.from(document.querySelectorAll('.stage-tab'));
+    this.stagePanels = Array.from(document.querySelectorAll('.stage-panel'));
+    this.sessionStatus = document.getElementById('session-status');
     this.timer = document.getElementById('timer');
     this.subtitleScroll = document.getElementById('subtitle-scroll');
     this.subtitleContainer = document.getElementById('subtitle-container');
@@ -73,6 +78,9 @@ class ExpressionTrainer {
   }
 
   bindEvents() {
+    this.stageTabs.forEach(tab => {
+      tab.addEventListener('click', () => this.switchStage(tab.dataset.stage));
+    });
     this.btnStart.addEventListener('click', () => this.startRecording());
     this.btnPaste.addEventListener('click', () => this.openPasteModal());
     this.btnPause.addEventListener('click', () => this.pauseRecording());
@@ -90,7 +98,7 @@ class ExpressionTrainer {
       const reportText = this.reportBody.innerText;
       navigator.clipboard.writeText(reportText).then(() => {
         this.btnCopyReport.textContent = '✅ 已复制';
-        setTimeout(() => { this.btnCopyReport.textContent = '📋 复制全文'; }, 2000);
+        setTimeout(() => { this.btnCopyReport.textContent = '复制全文'; }, 2000);
       });
     });
     this.btnClosePaste.addEventListener('click', () => this.pasteModal.classList.add('hidden'));
@@ -98,6 +106,37 @@ class ExpressionTrainer {
     this.btnCopyText.addEventListener('click', () => this.copyOriginalText());
     this.btnSaveText.addEventListener('click', () => this.saveOriginalText());
     this.btnClear.addEventListener('click', () => this.clearAll());
+    this.transcriptEditor.addEventListener('input', () => this.handleTranscriptEditorInput());
+  }
+
+  switchStage(stage) {
+    if (!stage || this.currentStage === stage) return;
+
+    this.currentStage = stage;
+    this.stageTabs.forEach(tab => tab.classList.toggle('active', tab.dataset.stage === stage));
+    this.stagePanels.forEach(panel => panel.classList.toggle('active', panel.dataset.panel === stage));
+  }
+
+  setSessionStatus(text) {
+    if (this.sessionStatus) this.sessionStatus.textContent = text;
+  }
+
+  syncTranscriptEditor() {
+    if (this.transcriptEditor && this.transcriptEditor.value !== this.fullText) {
+      this.transcriptEditor.value = this.fullText;
+    }
+  }
+
+  updateTextActionVisibility() {
+    const hasText = Boolean(this.fullText.trim() || this.transcriptEditor.value.trim());
+    this.btnReport.classList.toggle('hidden', !hasText);
+    this.btnCopyText.classList.toggle('hidden', !hasText);
+    this.btnSaveText.classList.toggle('hidden', !hasText);
+    this.btnClear.classList.toggle('hidden', !hasText);
+  }
+
+  handleTranscriptEditorInput() {
+    this.updateTextActionVisibility();
   }
 
   bindNativeSystemAudioEvents() {
@@ -133,7 +172,9 @@ class ExpressionTrainer {
 
       if (result?.finalTextError) {
         this.awaitingFinalTranscript = false;
+        this.setSessionStatus(this.fullText.trim() ? '待确认' : '待开始');
         this.addFeedbackItem(result.finalTextError, 'filler');
+        if (this.fullText.trim()) this.showReviewModal();
         return;
       }
 
@@ -141,7 +182,14 @@ class ExpressionTrainer {
         const duration = this.stats.duration || 0;
         await this.loadTranscriptText(result.finalText, { duration, requestFeedback: false });
         this.awaitingFinalTranscript = false;
+        this.setSessionStatus('待确认');
         this.addFeedbackItem('Qwen3-ASR 最终稿已生成', 'good');
+        if (result.speakerCount > 1) {
+          this.addFeedbackItem(`已按音色区分 ${result.speakerCount} 位说话人`, 'good');
+        } else if (result.speakerError) {
+          this.addFeedbackItem('说话人区分失败，已保留普通最终稿', 'filler');
+        }
+        this.showReviewModal();
         this.btnReport.classList.remove('hidden');
         this.btnCopyText.classList.remove('hidden');
         this.btnSaveText.classList.remove('hidden');
@@ -398,6 +446,7 @@ class ExpressionTrainer {
       }, 1000);
 
       this.activityMonitor = { stream, systemStream, audioContext, source, analyser, systemAnalyser, interval };
+      this.setSessionStatus('监听会议');
       this.addFeedbackItem('正在后台监听会议开始', 'ai');
     } catch (err) {
       this.showError(`自动会议监听启动失败: ${err.message}`);
@@ -416,10 +465,12 @@ class ExpressionTrainer {
     this.activityMonitor = null;
     await window.api.stopNativeSystemAudio();
     this.nativeSystemAudioRunning = false;
+    if (!this.isRecording) this.setSessionStatus(this.fullText.trim() ? '已有原文' : '待开始');
   }
 
   async startRecording(options = {}) {
     await this.stopActivityMonitor();
+    this.switchStage('live');
 
     const initResult = await window.api.initASR();
     if (!initResult.success) {
@@ -490,10 +541,13 @@ class ExpressionTrainer {
     this.fullText = '';
     this.sentences = [];
     this.meetingSession = null;
+    this.lastReport = '';
     this.realtimePhraseBuffer = '';
     this.realtimePhraseLastAt = 0;
     this.resetStats();
     this.subtitleContainer.innerHTML = '';
+    this.syncTranscriptEditor();
+    this.reportBody.innerHTML = '<p class="empty-state">完成录制或粘贴原文后，可以在这里生成表达分析报告。</p>';
 
     // UI
     this.btnStart.classList.add('hidden');
@@ -502,6 +556,8 @@ class ExpressionTrainer {
     this.btnReport.classList.add('hidden');
     this.btnResume.classList.add('hidden');
     this.timer.classList.add('active');
+    this.setSessionStatus(options.autoStarted ? '自动录制中' : '录制中');
+    this.updateTextActionVisibility();
 
     this.timerInterval = setInterval(() => this.updateTimer(), 1000);
     await window.api.markMeetingRecordingStarted();
@@ -513,6 +569,7 @@ class ExpressionTrainer {
     this.btnPause.classList.add('hidden');
     this.btnResume.classList.remove('hidden');
     this.timer.classList.remove('active');
+    this.setSessionStatus('已暂停');
   }
 
   resumeRecording() {
@@ -522,6 +579,7 @@ class ExpressionTrainer {
     this.btnResume.classList.add('hidden');
     this.btnPause.classList.remove('hidden');
     this.timer.classList.add('active');
+    this.setSessionStatus('录制中');
   }
 
   async stopRecording(options = {}) {
@@ -555,6 +613,7 @@ class ExpressionTrainer {
 
     if (stopResult?.finalTextPending) {
       this.awaitingFinalTranscript = true;
+      this.setSessionStatus('最终稿生成中');
       this.addFeedbackItem('Qwen3-ASR 正在后台生成最终稿', 'ai');
     }
 
@@ -562,6 +621,9 @@ class ExpressionTrainer {
       await this.loadTranscriptText(stopResult.finalText, { duration, requestFeedback: false });
       if (stopResult.finalTextSource === 'qwen3-asr') {
         this.addFeedbackItem('Qwen3-ASR 最终稿已生成', 'good');
+        if (stopResult.speakerCount > 1) {
+          this.addFeedbackItem(`已按音色区分 ${stopResult.speakerCount} 位说话人`, 'good');
+        }
       }
     }
 
@@ -579,7 +641,13 @@ class ExpressionTrainer {
       this.btnCopyText.classList.remove('hidden');
       this.btnSaveText.classList.remove('hidden');
       this.btnClear.classList.remove('hidden');
-      this.showReviewModal();
+      this.syncTranscriptEditor();
+      if (!stopResult?.finalTextPending) {
+        this.setSessionStatus('待确认');
+        this.showReviewModal();
+      }
+    } else {
+      this.setSessionStatus('待开始');
     }
 
     this.isStoppingRecording = false;
@@ -658,6 +726,8 @@ class ExpressionTrainer {
     this.realtimePhraseLastAt = 0;
     this.sentences.push(text);
     this.fullText += `${this.fullText ? '\n' : ''}${text}`;
+    this.syncTranscriptEditor();
+    this.updateTextActionVisibility();
     this.analyzeCurrentSentence(text);
 
     if (this.fullText.length - this.lastFeedbackText.length >= 30) {
@@ -794,6 +864,9 @@ class ExpressionTrainer {
 
     this.stats.duration = duration;
     this.updateStatsDisplay();
+    this.syncTranscriptEditor();
+    this.updateTextActionVisibility();
+    this.setSessionStatus(this.fullText.trim() ? '已有原文' : '待开始');
 
     if (requestFeedback) {
       this.requestRealtimeFeedback();
@@ -854,8 +927,22 @@ class ExpressionTrainer {
   // ===== 报告 =====
 
   async generateReport(options = {}) {
-    this.reportBody.innerHTML = '<p style="text-align:center;color:#666;padding:40px;">正在生成报告...</p>';
-    this.reportModal.classList.remove('hidden');
+    const editorText = this.transcriptEditor.value.trim();
+    if (!this.fullText.trim() && editorText) {
+      await this.loadTranscriptText(editorText, { duration: this.stats.duration || 0, requestFeedback: false });
+    }
+
+    if (!this.fullText.trim()) {
+      this.switchStage('transcript');
+      this.transcriptEditor.focus();
+      this.addFeedbackItem('先录制或粘贴一段会议原文，再生成报告', 'filler');
+      return;
+    }
+
+    this.switchStage('report');
+    this.setSessionStatus('生成报告中');
+    this.btnCopyReport.classList.add('hidden');
+    this.reportBody.innerHTML = '<p class="empty-state">正在生成报告...</p>';
 
     const result = await window.api.getFinalReport({
       fullText: this.fullText,
@@ -865,11 +952,13 @@ class ExpressionTrainer {
     if (result.success) {
       this.lastReport = result.report;
       this.renderReport(result.report);
+      this.setSessionStatus('报告已生成');
       if (options.autoSave) {
         await this.saveMeetingReportArtifact(result.report);
       }
     } else {
       this.reportBody.innerHTML = `<p style="color:#ff6b6b;">生成失败: ${result.error}</p>`;
+      this.setSessionStatus('报告生成失败');
     }
   }
 
@@ -888,10 +977,11 @@ class ExpressionTrainer {
 
     this.reportBody.innerHTML = `
       <div style="text-align:right;margin-bottom:12px;">
-        <button id="btn-save-report" style="background:#E5007E;color:#fff;border:none;border-radius:6px;padding:8px 14px;font-size:12px;cursor:pointer;">💾 保存为 Markdown</button>
+        <button id="btn-save-report" class="btn-primary">保存为 Markdown</button>
       </div>
       ${html}
     `;
+    this.btnCopyReport.classList.remove('hidden');
 
     document.getElementById('btn-save-report').addEventListener('click', () => this.saveReport());
   }
@@ -982,26 +1072,28 @@ class ExpressionTrainer {
   // ===== 复制 & 保存原文 & 清空 =====
 
   copyOriginalText() {
-    if (!this.fullText.trim()) return;
-    navigator.clipboard.writeText(this.fullText).then(() => {
+    const text = this.fullText.trim() ? this.fullText : this.transcriptEditor.value.trim();
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
       this.btnCopyText.textContent = '✓ 已复制';
-      setTimeout(() => { this.btnCopyText.textContent = '📋 复制'; }, 1500);
+      setTimeout(() => { this.btnCopyText.textContent = '复制'; }, 1500);
     });
   }
 
   async saveOriginalText() {
-    if (!this.fullText.trim()) return;
+    const text = this.fullText.trim() ? this.fullText : this.transcriptEditor.value.trim();
+    if (!text) return;
     const now = new Date();
     const dateStr = now.toISOString().slice(0, 10);
     const timeStr = now.toTimeString().slice(0, 5).replace(':', '');
-    const markdown = `# 表达训练原文\n\n**日期**: ${dateStr}\n\n---\n\n${this.fullText}`;
+    const markdown = `# 表达训练原文\n\n**日期**: ${dateStr}\n\n---\n\n${text}`;
     const filename = `原文-${dateStr}-${timeStr}.md`;
 
     try {
       const result = await window.api.saveFile(markdown, filename);
       if (result.success) {
         this.btnSaveText.textContent = '✓ 已保存';
-        setTimeout(() => { this.btnSaveText.textContent = '💾 保存'; }, 2000);
+        setTimeout(() => { this.btnSaveText.textContent = '保存'; }, 2000);
       }
     } catch (e) {
       alert('保存失败: ' + e.message);
@@ -1014,31 +1106,37 @@ class ExpressionTrainer {
     this.sentences = [];
     this.lastReport = '';
     this.meetingSession = null;
+    this.realtimePhraseBuffer = '';
+    this.realtimePhraseLastAt = 0;
     this.subtitleContainer.innerHTML = '<div class="subtitle-line hint">点击下方按钮开始说话</div>';
+    this.transcriptEditor.value = '';
+    this.reportBody.innerHTML = '<p class="empty-state">完成录制或粘贴原文后，可以在这里生成表达分析报告。</p>';
     this.feedbackContent.innerHTML = '';
     this.resetStats();
     this.timer.textContent = '00:00';
     this.timer.classList.remove('active');
     this.btnReport.classList.add('hidden');
+    this.btnCopyReport.classList.add('hidden');
     this.btnCopyText.classList.add('hidden');
     this.btnSaveText.classList.add('hidden');
     this.btnClear.classList.add('hidden');
+    this.reviewModal.classList.add('hidden');
+    this.setSessionStatus('待开始');
   }
 
   // ===== 粘贴逐字稿分析 =====
 
   openPasteModal() {
-    this.pasteTextarea.value = '';
-    this.pasteModal.classList.remove('hidden');
-    this.pasteTextarea.focus();
+    this.switchStage('transcript');
+    if (!this.transcriptEditor.value && this.fullText.trim()) {
+      this.syncTranscriptEditor();
+    }
+    this.transcriptEditor.focus();
   }
 
   async analyzePastedText() {
-    const text = this.pasteTextarea.value.trim();
+    const text = this.transcriptEditor.value.trim() || this.pasteTextarea.value.trim();
     if (!text) return;
-
-    // 关闭粘贴弹窗
-    this.pasteModal.classList.add('hidden');
 
     await this.loadTranscriptText(text, { duration: 0, requestFeedback: false });
 
@@ -1050,6 +1148,7 @@ class ExpressionTrainer {
 
     // 请求AI语境化反馈
     this.requestRealtimeFeedback();
+    this.switchStage('optimize');
   }
 }
 
