@@ -45,8 +45,10 @@ sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17-int8/
 
 | 模型预设 | 场景 | 特点 |
 |------|------|------|
-| SenseVoice Small int8 | 中文会议、结束后生成高质量逐字稿 | 小模型、本地离线、非实时最终转写 |
+| Paraformer 实时 + Qwen3-ASR 最终稿 | 会议场景推荐 | 录制中低延迟字幕，结束后用 Qwen3-ASR 重新生成更准确的最终稿 |
+| SenseVoice Small int8 | 中文会议、结束后生成逐字稿 | 小模型、本地离线、非实时最终转写 |
 | Paraformer 中英双语 | 需要边说边看实时字幕 | 流式识别、延迟低 |
+| Qwen3-ASR | 更重视最终稿准确率、不需要实时字幕 | Python qwen-asr worker，离线最终转写 |
 | 自定义 SenseVoice 兼容导出 | 你自己转换/下载了 sherpa-onnx 兼容 SenseVoice | 需要目录内有 `model.onnx` 和 `tokens.json` |
 
 注意：当前项目通过 `sherpa-onnx-node` 加载 SenseVoice。你之前提供的 Shandianshuo 模型实测缺少 sherpa-onnx 所需的 `vocab_size` 元数据，不能直接作为默认模型；因此新版默认改为官方 sherpa-onnx 兼容的 SenseVoice int8 目录。
@@ -65,6 +67,23 @@ tar xvf sherpa-onnx-streaming-paraformer-bilingual-zh-en.tar.bz2
 # 方法二：使用 huggingface
 # https://huggingface.co/csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en
 ```
+
+使用 Qwen3-ASR 最终稿时，需要单独准备 Python 环境。建议使用独立环境，避免和桌面应用的 Node 依赖混在一起：
+
+```bash
+conda create -n qwen3-asr python=3.12 -y
+conda activate qwen3-asr
+pip install -U qwen-asr
+```
+
+如果应用不是从这个 conda 环境启动，可以在启动前指定 Python 路径：
+
+```bash
+export QWEN3_ASR_PYTHON=/path/to/qwen3-asr/bin/python
+npm start
+```
+
+设置页的“Qwen3-ASR 模型路径或模型 ID”可以填写本地模型目录，也可以留空使用默认 `Qwen/Qwen3-ASR-1.7B`。首次使用模型 ID 时，`qwen-asr` 会按它自己的缓存规则下载模型；如果你希望完全本地离线，先把模型下载到本机目录，再把该目录填进设置页。
 
 下载后 `models/` 目录应包含：
 ```
@@ -97,6 +116,7 @@ npm start
 | 选项 | 说明 |
 |------|------|
 | 本地识别模型 | 默认 SenseVoice Small int8；也可切换 Paraformer 流式识别或自定义 SenseVoice |
+| Qwen3-ASR 模型路径或模型 ID | 选择“Paraformer 实时 + Qwen3-ASR 最终稿”或“Qwen3-ASR”时显示；留空使用 `Qwen/Qwen3-ASR-1.7B` |
 | 自定义 SenseVoice 模型目录 | 仅在选择自定义预设时填写，必须是 sherpa-onnx 兼容导出 |
 | 会议文件保存目录 | 留空时保存到 `Documents/Expression Trainer Meetings` |
 | 打开应用后自动开始录音 | 开启后进入主界面会自动请求麦克风并开始录音 |

@@ -14,7 +14,11 @@ contextBridge.exposeInMainWorld('api', {
 
   // 语音识别 - 使用 Web Audio 方案
   initASR: () => ipcRenderer.invoke('init-asr'),
-  feedAudio: (samples) => ipcRenderer.invoke('feed-audio', Array.from(samples)),
+  feedAudio: (samples) => {
+    const copy = new Float32Array(samples.length);
+    copy.set(samples);
+    return ipcRenderer.invoke('feed-audio', copy.buffer);
+  },
   stopASR: () => ipcRenderer.invoke('stop-asr'),
   updateMeetingActivity: (payload) => ipcRenderer.invoke('update-meeting-activity', payload),
   markMeetingRecordingStarted: () => ipcRenderer.invoke('mark-meeting-recording-started'),

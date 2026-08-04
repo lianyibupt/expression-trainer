@@ -11,13 +11,20 @@
     "build:system-audio-helper": "cd native/system-audio-helper && CLANG_MODULE_CACHE_PATH=$(pwd)/.build/clang-module-cache swift build --cache-path $(pwd)/.build/swiftpm-cache",
     "probe:system-audio": "cd native/system-audio-helper && .build/debug/system-audio-probe --duration 10 --out /tmp/system-audio-probe.wav"
   },
-  "keywords": ["expression", "training", "speech", "asr", "chinese"],
+  "keywords": [
+    "expression",
+    "training",
+    "speech",
+    "asr",
+    "chinese"
+  ],
   "author": "sisi",
   "license": "MIT",
   "devDependencies": {
     "electron": "^33.0.0"
   },
   "dependencies": {
-    "sherpa-onnx-node": "^1.10.0"
+    "sherpa-onnx-darwin-arm64": "^1.13.3",
+    "sherpa-onnx-node": "^1.13.3"
   }
 }

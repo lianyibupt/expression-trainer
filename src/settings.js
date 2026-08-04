@@ -34,9 +34,19 @@ const PROVIDER_CONFIG = {
 };
 
 const ASR_MODEL_HINTS = {
+  'paraformer-qwen3-final': '录制中使用 Paraformer 保持低延迟字幕；结束录音后用 Python qwen-asr 调用 Qwen3-ASR 重新生成更准确的最终逐字稿。',
   'sensevoice-int8': '下载 sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17-int8 到项目 models/ 目录。结束录音后生成最终逐字稿。',
   'paraformer-streaming': '使用项目 models/sherpa-onnx-streaming-paraformer-bilingual-zh-en，录音时实时出字幕。',
+  'qwen3-asr-python': '使用 Python qwen-asr 包调用 Qwen3-ASR，结束录音后生成高质量最终逐字稿。留空模型路径时使用 Qwen/Qwen3-ASR-1.7B。',
   'sensevoice-custom': '只支持 sherpa-onnx 兼容导出的 SenseVoice 目录；普通 FunASR/Shandianshuo 导出可能无法直接加载。'
+};
+
+const ASR_ENGINE_BY_PRESET = {
+  'paraformer-qwen3-final': 'hybrid',
+  'paraformer-streaming': 'paraformer',
+  'qwen3-asr-python': 'qwen3-asr-python',
+  'sensevoice-int8': 'sensevoice',
+  'sensevoice-custom': 'sensevoice'
 };
 
 class SettingsPage {
@@ -52,6 +62,7 @@ class SettingsPage {
     this.asrModelPresetSelect = document.getElementById('asr-model-preset');
     this.asrModelHint = document.getElementById('asr-model-hint');
     this.sensevoiceModelPathInput = document.getElementById('sensevoice-model-path');
+    this.qwen3ModelPathInput = document.getElementById('qwen3-model-path');
     this.meetingOutputDirInput = document.getElementById('meeting-output-dir');
     this.autoStartRecordingInput = document.getElementById('auto-start-recording');
     this.launchAtLoginInput = document.getElementById('launch-at-login');
@@ -74,6 +85,7 @@ class SettingsPage {
     this.groupCustom = document.getElementById('group-custom');
     this.groupCustomModel = document.getElementById('group-custom-model');
     this.groupSensevoicePath = document.getElementById('group-sensevoice-path');
+    this.groupQwen3Path = document.getElementById('group-qwen3-path');
 
     this.bindEvents();
     this.loadSettings();
@@ -101,10 +113,11 @@ class SettingsPage {
     const asr = this.settings.asr || {};
     const meeting = this.settings.meeting || {};
 
-    const modelPreset = asr.modelPreset || (asr.engine === 'paraformer' ? 'paraformer-streaming' : asr.modelPath ? 'sensevoice-custom' : 'sensevoice-int8');
+    const modelPreset = asr.modelPreset || (asr.engine === 'hybrid' ? 'paraformer-qwen3-final' : asr.engine === 'qwen3-asr-python' ? 'qwen3-asr-python' : asr.engine === 'paraformer' ? 'paraformer-streaming' : asr.modelPath ? 'sensevoice-custom' : 'sensevoice-int8');
 
     this.asrModelPresetSelect.value = modelPreset;
     this.sensevoiceModelPathInput.value = asr.modelPath || '';
+    this.qwen3ModelPathInput.value = asr.qwen3ModelPath || '';
     this.meetingOutputDirInput.value = meeting.outputDir || '';
     this.autoStartRecordingInput.checked = Boolean(meeting.autoStartRecording);
     this.launchAtLoginInput.checked = Boolean(meeting.launchAtLogin);
@@ -219,6 +232,7 @@ class SettingsPage {
   onASRModelChange() {
     const modelPreset = this.asrModelPresetSelect.value;
     this.groupSensevoicePath.style.display = modelPreset === 'sensevoice-custom' ? '' : 'none';
+    this.groupQwen3Path.style.display = modelPreset === 'paraformer-qwen3-final' || modelPreset === 'qwen3-asr-python' ? '' : 'none';
     this.asrModelHint.textContent = ASR_MODEL_HINTS[modelPreset] || '';
   }
 
@@ -261,8 +275,9 @@ class SettingsPage {
     settings.asr = {
       ...(settings.asr || {}),
       modelPreset: this.asrModelPresetSelect.value,
-      engine: this.asrModelPresetSelect.value === 'paraformer-streaming' ? 'paraformer' : 'sensevoice',
+      engine: ASR_ENGINE_BY_PRESET[this.asrModelPresetSelect.value] || 'sensevoice',
       modelPath: this.asrModelPresetSelect.value === 'sensevoice-custom' ? this.sensevoiceModelPathInput.value.trim() : '',
+      qwen3ModelPath: this.qwen3ModelPathInput.value.trim(),
       language: 'zh'
     };
 

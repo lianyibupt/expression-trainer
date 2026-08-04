@@ -468,24 +468,34 @@ ipcMain.handle('close-current-window', (event) => {
 ipcMain.handle('init-asr', async () => {
   try {
     const settings = loadSettings();
-    await initASR(settings.asr || DEFAULT_ASR_CONFIG);
+    const runtime = await initASR(settings.asr || DEFAULT_ASR_CONFIG);
     asrReady = true;
-    return { success: true };
+    return { success: true, ...runtime };
   } catch (error) {
     return { success: false, error: error.message };
   }
 });
 
+function normalizeAudioSamples(payload) {
+  if (payload instanceof ArrayBuffer) {
+    return new Float32Array(payload);
+  }
+  if (ArrayBuffer.isView(payload)) {
+    return new Float32Array(payload.buffer, payload.byteOffset, Math.floor(payload.byteLength / 4));
+  }
+  return new Float32Array(payload);
+}
+
 // 接收渲染进程发来的音频数据
-ipcMain.handle('feed-audio', (event, samplesArray) => {
+ipcMain.handle('feed-audio', (event, samplesPayload) => {
   if (!asrReady) return null;
-  const samples = new Float32Array(samplesArray);
+  const samples = normalizeAudioSamples(samplesPayload);
   const result = feedAudio(samples);
   return result; // { text, isFinal } or null
 });
 
-ipcMain.handle('stop-asr', () => {
-  const finalText = stopRecognition();
+ipcMain.handle('stop-asr', async () => {
+  const finalText = await stopRecognition();
   asrReady = false;
   return { success: true, finalText };
 });

@@ -217,8 +217,10 @@
       <div class="form-group">
         <label>本地识别模型</label>
         <select id="asr-model-preset">
-          <option value="sensevoice-int8">SenseVoice Small int8（推荐，离线最终转写）</option>
-          <option value="paraformer-streaming">Paraformer 中英双语（流式字幕）</option>
+          <option value="paraformer-qwen3-final">Paraformer 实时 + Qwen3-ASR 最终稿（推荐）</option>
+          <option value="sensevoice-int8">SenseVoice Small int8（离线最终转写，非实时）</option>
+          <option value="paraformer-streaming">Paraformer 中英双语（低延迟流式字幕）</option>
+          <option value="qwen3-asr-python">Qwen3-ASR（高质量离线，非实时）</option>
           <option value="sensevoice-custom">自定义 SenseVoice 兼容导出</option>
         </select>
         <div class="hint" id="asr-model-hint"></div>
@@ -228,6 +230,12 @@
         <label>自定义 SenseVoice 模型目录</label>
         <input type="text" id="sensevoice-model-path" placeholder="/path/to/sherpa-onnx-sensevoice-export">
         <div class="hint">目录内需要包含 sherpa-onnx 兼容的 model.onnx 和 tokens.json</div>
+      </div>
+
+      <div class="form-group" id="group-qwen3-path">
+        <label>Qwen3-ASR 模型路径或模型 ID</label>
+        <input type="text" id="qwen3-model-path" placeholder="Qwen/Qwen3-ASR-1.7B 或 /path/to/Qwen3-ASR-1.7B">
+        <div class="hint">需要本机 Python 环境安装 qwen-asr；留空使用 Qwen/Qwen3-ASR-1.7B</div>
       </div>
 
       <div class="form-group">

@@ -25,6 +25,7 @@ class ExpressionTrainer {
     this.nativeSystemAudioQueuedSamples = 0;
     this.lastNativeSystemAudioAt = 0;
     this.nativeSystemAudioRunning = false;
+    this.lastAsrPerfLogAt = 0;
 
     this.initElements();
     this.bindEvents();
@@ -399,6 +400,13 @@ class ExpressionTrainer {
       if (settings?.meeting?.autoDetectMeeting) await this.startActivityMonitor();
       return;
     }
+    if (initResult.mode === 'offline') {
+      this.addFeedbackItem('当前识别模型为离线最终转写，录制中不会实时出字幕', 'filler');
+    } else if (initResult.mode === 'streaming-final') {
+      this.addFeedbackItem('当前识别模型为实时字幕 + 高质量最终转写', 'good');
+    } else if (initResult.mode === 'streaming') {
+      this.addFeedbackItem('当前识别模型为低延迟流式字幕', 'good');
+    }
 
     try {
       const settings = await this.getSettings();
@@ -408,13 +416,16 @@ class ExpressionTrainer {
       const source = this.audioContext.createMediaStreamSource(stream);
       const micGain = this.audioContext.createGain();
       micGain.gain.value = this.systemAudioStream ? 0.75 : 1;
-      this.audioProcessor = this.audioContext.createScriptProcessor(4096, 1, 1);
+      this.audioProcessor = this.audioContext.createScriptProcessor(2048, 1, 1);
       this.audioProcessor.onaudioprocess = async (e) => {
         if (!this.isRecording || this.isPaused) return;
         const samples = this.mixNativeSystemAudio(e.inputBuffer.getChannelData(0));
+        const resultPromise = window.api.feedAudio(samples);
         const systemActive = this.analyserIsActive(this.systemAudioAnalyser);
-        await this.updateMeetingActivityFromSamples(samples, { hasOutput: systemActive });
-        const result = await window.api.feedAudio(samples);
+        this.updateMeetingActivityFromSamples(samples, { hasOutput: systemActive }).catch(error => {
+          console.error('[MeetingActivity] 更新失败', error);
+        });
+        const result = await resultPromise;
         if (result) this.handleASRResult(result);
       };
 
@@ -576,7 +587,12 @@ class ExpressionTrainer {
 
   // ===== ASR结果处理 =====
 
-  handleASRResult({ text, isFinal }) {
+  handleASRResult({ text, isFinal, asrMs, mode }) {
+    if (asrMs != null && Date.now() - this.lastAsrPerfLogAt > 5000) {
+      this.lastAsrPerfLogAt = Date.now();
+      console.debug(`[ASR] mode=${mode || 'unknown'} chunkDecode=${asrMs}ms textLength=${text.length}`);
+    }
+
     if (isFinal) {
       this.sentences.push(text);
       this.fullText += text;

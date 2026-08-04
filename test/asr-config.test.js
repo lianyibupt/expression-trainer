@@ -23,7 +23,29 @@ test('buildASRConfig keeps the existing streaming paraformer as a selectable pre
   assert.equal(config.modelPreset, 'paraformer-streaming');
   assert.equal(config.recognizerConfig.modelConfig.paraformer.encoder.endsWith('encoder.int8.onnx'), true);
   assert.equal(config.recognizerConfig.modelConfig.paraformer.decoder.endsWith('decoder.int8.onnx'), true);
+  assert.equal(config.recognizerConfig.modelConfig.numThreads, 4);
   assert.equal(config.recognizerConfig.enableEndpoint, true);
+  assert.equal(config.recognizerConfig.rule1MinTrailingSilence, 0.8);
+  assert.equal(config.recognizerConfig.rule2MinTrailingSilence, 0.4);
+  assert.equal(config.recognizerConfig.rule3MinUtteranceLength, 8);
+});
+
+test('buildASRConfig supports hybrid Paraformer realtime plus Qwen3-ASR final transcription', () => {
+  const config = buildASRConfig({ modelPreset: 'paraformer-qwen3-final' });
+
+  assert.equal(config.engine, 'hybrid');
+  assert.equal(config.mode, 'streaming-final');
+  assert.equal(config.finalEngine, 'qwen3-asr-python');
+  assert.equal(config.finalModel, 'Qwen/Qwen3-ASR-1.7B');
+  assert.equal(config.recognizerConfig.modelConfig.paraformer.encoder.endsWith('encoder.int8.onnx'), true);
+});
+
+test('buildASRConfig supports Qwen3-ASR as an offline final transcription preset', () => {
+  const config = buildASRConfig({ modelPreset: 'qwen3-asr-python', qwen3ModelPath: '/models/qwen3-asr' });
+
+  assert.equal(config.engine, 'qwen3-asr-python');
+  assert.equal(config.mode, 'offline');
+  assert.equal(config.finalModel, '/models/qwen3-asr');
 });
 
 test('buildASRConfig supports a custom SenseVoice directory for compatible exports', () => {
