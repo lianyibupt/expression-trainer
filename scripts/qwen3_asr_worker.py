@@ -25,6 +25,7 @@ def parse_args():
     parser.add_argument("--device-map", default=os.environ.get("QWEN3_ASR_DEVICE_MAP", "auto"))
     parser.add_argument("--max-new-tokens", type=int, default=int(os.environ.get("QWEN3_ASR_MAX_NEW_TOKENS", "4096")))
     parser.add_argument("--batch-size", type=int, default=int(os.environ.get("QWEN3_ASR_BATCH_SIZE", "1")))
+    parser.add_argument("--chunk-seconds", type=float, default=float(os.environ.get("QWEN3_ASR_CHUNK_SECONDS", "45")), help="Maximum audio seconds per inference batch")
     parser.add_argument("--speaker-diarization", action="store_true", help="Cluster local voice features and transcribe each speaker turn")
     parser.add_argument("--check", action="store_true", help="Only check Python dependencies")
     return parser.parse_args()
@@ -220,22 +221,60 @@ def assign_speakers(samples, segments):
     return normalized, len(remap)
 
 
-def diarize_and_transcribe(samples, model, language):
+def split_audio_chunks(samples, chunk_seconds):
+    chunk_size = max(10, int(chunk_seconds * SAMPLE_RATE))
+    return [samples[start:start + chunk_size] for start in range(0, len(samples), chunk_size) if len(samples[start:start + chunk_size]) > 0]
+
+
+def transcribe_audio_chunks(model, chunks, language, chunk_seconds):
+    """Transcribe bounded batches while keeping one model instance alive."""
+    texts = []
+    current = []
+    current_seconds = 0.0
+
+    def flush():
+        nonlocal current, current_seconds
+        if not current:
+            return
+        results = model.transcribe(
+            audio=[(chunk, SAMPLE_RATE) for chunk in current],
+            language=language,
+        )
+        texts.extend(str(getattr(result, "text", "") or "").strip() for result in results)
+        current = []
+        current_seconds = 0.0
+
+    for chunk in chunks:
+        duration = len(chunk) / SAMPLE_RATE
+        if current and current_seconds + duration > chunk_seconds:
+            flush()
+        current.append(chunk)
+        current_seconds += duration
+    flush()
+    return texts
+
+
+def transcribe_plain_audio(samples, model, language, chunk_seconds):
+    texts = transcribe_audio_chunks(model, split_audio_chunks(samples, chunk_seconds), language, chunk_seconds)
+    return "".join(text for text in texts if text)
+
+
+def diarize_and_transcribe(samples, model, language, chunk_seconds):
     segments = find_speech_segments(samples)
     if not segments:
         return {"text": "", "speaker_segments": [], "speaker_count": 0}
 
     labels, speaker_count = assign_speakers(samples, segments)
-    audio_batch = []
+    audio_items = []
     for start_sec, end_sec in segments:
         start = int(start_sec * SAMPLE_RATE)
         end = int(end_sec * SAMPLE_RATE)
-        audio_batch.append((samples[start:end], SAMPLE_RATE))
+        audio_items.append(samples[start:end])
 
-    results = model.transcribe(audio=audio_batch, language=language)
+    texts = transcribe_audio_chunks(model, audio_items, language, chunk_seconds)
     speaker_segments = []
-    for (start_sec, end_sec), label, result in zip(segments, labels, results):
-        text = str(getattr(result, "text", "") or "").strip()
+    for (start_sec, end_sec), label, text in zip(segments, labels, texts):
+        text = str(text or "").strip()
         if not text:
             continue
         speaker_segments.append({
@@ -306,13 +345,11 @@ def main():
     samples = read_wav(args.audio)
     if args.speaker_diarization:
         try:
-            result = diarize_and_transcribe(samples, model, language)
+            result = diarize_and_transcribe(samples, model, language, args.chunk_seconds)
         except Exception as exc:
             # Speaker clustering is an enhancement; never lose the normal final transcript.
-            results = model.transcribe(audio=args.audio, language=language)
-            first = results[0]
             result = {
-                "text": str(getattr(first, "text", "") or "").strip(),
+                "text": transcribe_plain_audio(samples, model, language, args.chunk_seconds),
                 "speaker_segments": [],
                 "speaker_count": 0,
                 "speaker_error": str(exc),
@@ -320,11 +357,10 @@ def main():
         result["language"] = language
         print(json.dumps(result, ensure_ascii=False))
     else:
-        results = model.transcribe(audio=args.audio, language=language)
-        first = results[0]
+        text = transcribe_plain_audio(samples, model, language, args.chunk_seconds)
         print(json.dumps({
-            "language": getattr(first, "language", None),
-            "text": getattr(first, "text", ""),
+            "language": language,
+            "text": text,
         }, ensure_ascii=False))
     return 0
 
