@@ -514,6 +514,20 @@ button {
 
 .audio-player-card { padding: 14px; }
 .audio-player-card audio { width: 100%; height: 34px; margin-bottom: 10px; }
+
+.audio-analysis-progress {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px 14px;
+  align-items: center;
+  margin: 14px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--muted);
+}
+.audio-analysis-progress progress { grid-column: 1 / -1; width: 100%; height: 6px; accent-color: var(--accent); }
 #audio-waveform { width: 100%; height: 116px; display: block; border-radius: 6px; background: #0b0c0d; cursor: pointer; }
 .audio-time-row { display: flex; justify-content: space-between; margin-top: 6px; color: var(--dim); font: 11px "SF Mono", Menlo, Consolas, monospace; }
 
@@ -527,6 +541,14 @@ button {
 .audio-analysis-result h3 { color: var(--accent); margin-bottom: 8px; font-size: 15px; }
 .audio-analysis-result .analysis-note { color: var(--dim); margin-top: 14px; font-size: 12px; }
 .audio-analysis-result .analysis-error { color: var(--danger); }
+.audio-analysis-result .analysis-progress { padding: 8px 10px; border-radius: 6px; background: rgba(42, 169, 255, 0.1); color: var(--accent-2); }
+.analysis-summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 18px; }
+.analysis-summary-grid div { padding: 10px; border-radius: 7px; background: #0b0c0d; border: 1px solid var(--line); }
+.analysis-summary-grid span { display: block; color: var(--dim); font-size: 11px; margin-bottom: 5px; }
+.analysis-summary-grid strong { color: var(--text); font-size: 14px; }
+.audio-speaker-table { width: 100%; margin-top: 12px; border-collapse: collapse; font-size: 12px; }
+.audio-speaker-table th, .audio-speaker-table td { padding: 7px 8px; border: 1px solid var(--line); text-align: left; }
+.audio-speaker-table th { color: var(--dim); background: #0b0c0d; font-weight: 500; }
 .audio-timeline { display: flex; gap: 3px; height: 34px; align-items: center; margin: 12px 0 4px; }
 .audio-timeline-item { height: 100%; min-width: 4px; padding: 0; border: none; border-radius: 3px; background: #343c43; cursor: pointer; }
 .audio-timeline-item span { display: block; width: 100%; height: 100%; border-radius: 3px; background: linear-gradient(180deg, #ff70b9, #e5007e); opacity: 0.8; }
@@ -589,6 +611,7 @@ button {
   .audio-workspace { grid-template-columns: 1fr; grid-template-rows: auto; overflow-y: auto; }
   .audio-dropzone { grid-row: auto; min-height: 190px; }
   .audio-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .analysis-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .audio-metric:nth-child(2) { border-right: none; }
   .audio-metric:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
   .review-panel { grid-template-columns: 1fr; }

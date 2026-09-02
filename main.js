@@ -2,11 +2,12 @@ const { app, BrowserWindow, ipcMain, session, Menu, desktopCapturer } = require(
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
-const { initASR, feedAudio, stopRecognition, transcribeAudioFile } = require('./lib/asr');
+const { initASR, feedAudio, stopRecognition, transcribeAudioFile, cancelQwen3Transcription } = require('./lib/asr');
 const { loadLexicon, analyzeText } = require('./lib/lexicon');
 const { sendFeedback, sendReport, sendMeetingMinutes, testConnection } = require('./lib/ai-feedback');
 const { createTranscriptArtifact, saveMinutesArtifact, saveReportArtifact, saveAudioArtifact } = require('./lib/meeting-session');
-const { analyzeAudioFile } = require('./lib/audio-analysis');
+const { analyzeAudioFile, buildConversationAnalysis } = require('./lib/audio-analysis');
+const { runOpenSmile } = require('./lib/opensmile');
 const { MeetingActivityDetector } = require('./lib/meeting-activity-detector');
 const { pathToFileURL } = require('url');
 
@@ -27,6 +28,15 @@ let asrReady = false;
 let displayMediaHandlerReady = false;
 let nativeSystemAudioProcess = null;
 const meetingActivityDetector = new MeetingActivityDetector();
+
+async function attachOpenSmileFeatures(wavPath, segments, report) {
+  try {
+    report.openSmile = { enabled: true, ...(await runOpenSmile(wavPath, segments)) };
+  } catch (error) {
+    report.openSmile = { enabled: false, error: error.message, speakers: [], segmentDetails: [] };
+  }
+  return report;
+}
 
 function normalizeAudioFile(inputPath) {
   return new Promise((resolve, reject) => {
@@ -615,20 +625,17 @@ ipcMain.handle('select-audio-file', async () => {
   return { success: true, filePath, fileUrl: pathToFileURL(filePath).href, name: path.basename(filePath) };
 });
 
-ipcMain.handle('analyze-audio-file', async (event, { filePath, transcribe = false }) => {
+ipcMain.handle('analyze-audio-file', async (event, { filePath }) => {
   let normalized;
   try {
     normalized = await normalizeAudioFile(filePath);
-    const audioAnalysis = analyzeAudioFile(normalized.outputPath);
-    let transcription = null;
-    if (transcribe) {
-      const settings = loadSettings();
-      const model = settings.asr?.qwen3ModelPath || settings.asr?.finalModelPath || undefined;
-      transcription = await transcribeAudioFile(normalized.outputPath, model, {
-        speakerDiarization: settings.asr?.speakerDiarization !== false
-      });
-    }
-    return { success: true, audioAnalysis, transcription, normalizedPath: normalized.outputPath };
+    const baseAnalysis = await attachOpenSmileFeatures(normalized.outputPath, [], analyzeAudioFile(normalized.outputPath));
+    const audioAnalysis = buildConversationAnalysis(baseAnalysis, null);
+    return {
+      success: true,
+      audioAnalysis,
+      transcription: null
+    };
   } catch (error) {
     return { success: false, error: error.message };
   } finally {
@@ -636,7 +643,34 @@ ipcMain.handle('analyze-audio-file', async (event, { filePath, transcribe = fals
   }
 });
 
-ipcMain.handle('save-meeting-transcript', async (event, { transcript, stats, audioPath }) => {
+ipcMain.handle('transcribe-audio-file', async (event, { filePath }) => {
+  let normalized;
+  try {
+    normalized = await normalizeAudioFile(filePath);
+    const settings = loadSettings();
+    const model = settings.asr?.qwen3ModelPath || settings.asr?.finalModelPath || undefined;
+    const transcription = await transcribeAudioFile(normalized.outputPath, model, {
+      speakerDiarization: settings.asr?.speakerDiarization !== false,
+      onProgress: progress => event.sender.send('audio-analysis-progress', progress)
+    });
+    event.sender.send('audio-analysis-progress', { stage: 'opensmile', processedSeconds: 0, totalSeconds: 0, detail: 'openSMILE 声学特征提取中' });
+    const baseAnalysis = await attachOpenSmileFeatures(
+      normalized.outputPath,
+      transcription?.speaker_segments || [],
+      analyzeAudioFile(normalized.outputPath, transcription?.speaker_segments || [])
+    );
+    const audioAnalysis = buildConversationAnalysis(baseAnalysis, transcription);
+    return { success: true, audioAnalysis, transcription };
+  } catch (error) {
+    return { success: false, error: error.message };
+  } finally {
+    if (normalized?.tempDir) fs.rmSync(normalized.tempDir, { recursive: true, force: true });
+  }
+});
+
+ipcMain.handle('cancel-audio-analysis', () => ({ success: cancelQwen3Transcription() }));
+
+ipcMain.handle('save-meeting-transcript', async (event, { transcript, stats, audioPath, speakerSegments }) => {
   const settings = loadSettings();
   const rootDir = getMeetingOutputDir(settings);
 
@@ -649,7 +683,11 @@ ipcMain.handle('save-meeting-transcript', async (event, { transcript, stats, aud
     });
     if (!audioPath) return { success: true, ...transcriptResult };
 
-    const audioAnalysis = analyzeAudioFile(audioPath);
+    const audioBaseAnalysis = analyzeAudioFile(audioPath, speakerSegments || []);
+    const audioAnalysis = buildConversationAnalysis(await attachOpenSmileFeatures(audioPath, speakerSegments || [], audioBaseAnalysis), {
+      text: transcript,
+      speaker_segments: speakerSegments || []
+    });
     const audioResult = saveAudioArtifact({
       sessionDir: transcriptResult.sessionDir,
       audioPath,

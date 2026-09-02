@@ -31,6 +31,16 @@ def parse_args():
     return parser.parse_args()
 
 
+def emit_progress(stage, processed_seconds, total_seconds, detail=""):
+    print(json.dumps({
+        "progress": True,
+        "stage": stage,
+        "processedSeconds": round(float(processed_seconds), 2),
+        "totalSeconds": round(float(total_seconds), 2),
+        "detail": detail,
+    }, ensure_ascii=False), flush=True)
+
+
 SAMPLE_RATE = 16000
 
 
@@ -226,14 +236,15 @@ def split_audio_chunks(samples, chunk_seconds):
     return [samples[start:start + chunk_size] for start in range(0, len(samples), chunk_size) if len(samples[start:start + chunk_size]) > 0]
 
 
-def transcribe_audio_chunks(model, chunks, language, chunk_seconds):
+def transcribe_audio_chunks(model, chunks, language, chunk_seconds, total_seconds=0.0):
     """Transcribe bounded batches while keeping one model instance alive."""
     texts = []
     current = []
     current_seconds = 0.0
+    processed_seconds = 0.0
 
     def flush():
-        nonlocal current, current_seconds
+        nonlocal current, current_seconds, processed_seconds
         if not current:
             return
         results = model.transcribe(
@@ -241,9 +252,12 @@ def transcribe_audio_chunks(model, chunks, language, chunk_seconds):
             language=language,
         )
         texts.extend(str(getattr(result, "text", "") or "").strip() for result in results)
+        processed_seconds += current_seconds
+        emit_progress("transcribing", processed_seconds, total_seconds, "转写音频片段中")
         current = []
         current_seconds = 0.0
 
+    emit_progress("chunking", 0, total_seconds, "音频切片中")
     for chunk in chunks:
         duration = len(chunk) / SAMPLE_RATE
         if current and current_seconds + duration > chunk_seconds:
@@ -255,11 +269,13 @@ def transcribe_audio_chunks(model, chunks, language, chunk_seconds):
 
 
 def transcribe_plain_audio(samples, model, language, chunk_seconds):
-    texts = transcribe_audio_chunks(model, split_audio_chunks(samples, chunk_seconds), language, chunk_seconds)
+    chunks = split_audio_chunks(samples, chunk_seconds)
+    texts = transcribe_audio_chunks(model, chunks, language, chunk_seconds, len(samples) / SAMPLE_RATE)
     return "".join(text for text in texts if text)
 
 
 def diarize_and_transcribe(samples, model, language, chunk_seconds):
+    emit_progress("diarization", 0, len(samples) / SAMPLE_RATE, "说话人分离中")
     segments = find_speech_segments(samples)
     if not segments:
         return {"text": "", "speaker_segments": [], "speaker_count": 0}
@@ -271,7 +287,7 @@ def diarize_and_transcribe(samples, model, language, chunk_seconds):
         end = int(end_sec * SAMPLE_RATE)
         audio_items.append(samples[start:end])
 
-    texts = transcribe_audio_chunks(model, audio_items, language, chunk_seconds)
+    texts = transcribe_audio_chunks(model, audio_items, language, chunk_seconds, len(samples) / SAMPLE_RATE)
     speaker_segments = []
     for (start_sec, end_sec), label, text in zip(segments, labels, texts):
         text = str(text or "").strip()

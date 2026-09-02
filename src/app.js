@@ -68,6 +68,12 @@ class ExpressionTrainer {
     this.btnAudioSelect = document.getElementById('btn-audio-select');
     this.btnAudioAnalyze = document.getElementById('btn-audio-analyze');
     this.btnAudioTranscribe = document.getElementById('btn-audio-transcribe');
+    this.btnAudioCancel = document.getElementById('btn-audio-cancel');
+    this.audioProgress = document.getElementById('audio-analysis-progress');
+    this.audioProgressStage = document.getElementById('audio-progress-stage');
+    this.audioProgressDetail = document.getElementById('audio-progress-detail');
+    this.audioProgressBar = document.getElementById('audio-progress-bar');
+    this.audioProgressTime = document.getElementById('audio-progress-time');
     this.audioDropzone = document.getElementById('audio-dropzone');
     this.audioFileName = document.getElementById('audio-file-name');
     this.audioPlayer = document.getElementById('audio-player');
@@ -76,6 +82,8 @@ class ExpressionTrainer {
     this.audioDuration = document.getElementById('audio-duration');
     this.audioAnalysisResult = document.getElementById('audio-analysis-result');
     this.audioFile = null;
+    this.speakerSegments = [];
+    this.audioAnalysisCancelled = false;
     this.pasteModal = document.getElementById('paste-modal');
     this.pasteTextarea = document.getElementById('paste-textarea');
     this.transcriptEditor = document.getElementById('transcript-editor');
@@ -131,6 +139,8 @@ class ExpressionTrainer {
     this.btnAudioSelect.addEventListener('click', () => this.selectAudioFile());
     this.btnAudioAnalyze.addEventListener('click', () => this.runAudioAnalysis(false));
     this.btnAudioTranscribe.addEventListener('click', () => this.runAudioAnalysis(true));
+    this.btnAudioCancel.addEventListener('click', () => this.cancelAudioAnalysis());
+    window.api.onAudioAnalysisProgress(progress => this.renderAudioProgress(progress));
     ['dragenter', 'dragover'].forEach(type => this.audioDropzone.addEventListener(type, event => {
       event.preventDefault();
       this.audioDropzone.classList.add('dragging');
@@ -267,39 +277,102 @@ class ExpressionTrainer {
     if (!this.audioFile?.filePath) return;
     this.btnAudioAnalyze.disabled = true;
     this.btnAudioTranscribe.disabled = true;
+    this.audioAnalysisCancelled = false;
+    this.btnAudioCancel.classList.remove('hidden');
+    this.btnAudioCancel.disabled = false;
+    this.audioProgress.classList.remove('hidden');
+    this.audioProgressStage.textContent = transcribe ? '准备转写' : '分析音频';
     this.audioAnalysisResult.innerHTML = `<p class="empty-state">正在${transcribe ? '转写并分析' : '分析音频'}，全程在本机执行...</p>`;
     this.setSessionStatus('本地音频分析中');
     try {
-      const result = await window.api.analyzeAudioFile({ filePath: this.audioFile.filePath, transcribe });
+      const result = await window.api.analyzeAudioFile({ filePath: this.audioFile.filePath });
       if (!result.success) throw new Error(result.error || '音频分析失败');
-      this.renderAudioAnalysis(result.audioAnalysis, result.transcription);
+      this.renderAudioAnalysis(result.audioAnalysis, null);
+      if (transcribe) {
+        this.audioAnalysisResult.insertAdjacentHTML('afterbegin', '<p class="analysis-progress">声学分析已完成，正在进行本地转写和说话人分离...</p>');
+        this.setSessionStatus('本地转写与说话人分离中');
+        const transcriptionResult = await window.api.transcribeAudioFile({ filePath: this.audioFile.filePath });
+        if (!transcriptionResult.success) throw new Error(transcriptionResult.error || '本地转写失败');
+        this.renderAudioAnalysis(transcriptionResult.audioAnalysis, transcriptionResult.transcription);
+      }
       this.setSessionStatus('音频分析完成');
     } catch (error) {
-      this.audioAnalysisResult.innerHTML = `<p class="analysis-error">分析失败：${error.message}</p>`;
-      this.setSessionStatus('音频分析失败');
+      if (this.audioAnalysisCancelled) {
+        this.audioAnalysisResult.innerHTML = '<p class="empty-state">分析已取消，未保存不完整的转写结果。</p>';
+        this.setSessionStatus('音频分析已取消');
+      } else {
+        this.audioAnalysisResult.innerHTML = `<p class="analysis-error">分析失败：${error.message}</p>`;
+        this.setSessionStatus('音频分析失败');
+      }
     } finally {
       this.btnAudioAnalyze.disabled = false;
       this.btnAudioTranscribe.disabled = false;
+      this.btnAudioCancel.disabled = true;
+      this.btnAudioCancel.classList.add('hidden');
+      this.audioProgress.classList.add('hidden');
     }
+  }
+
+  renderAudioProgress(progress = {}) {
+    const labels = { 'loading-model': '加载模型', chunking: '音频切片', transcribing: '转写', diarization: '说话人分离', opensmile: 'openSMILE' };
+    const total = Number(progress.totalSeconds || this.audioPlayer.duration || 0);
+    const processed = Math.min(total || 0, Number(progress.processedSeconds || 0));
+    this.audioProgress.classList.remove('hidden');
+    this.audioProgressStage.textContent = labels[progress.stage] || '分析中';
+    this.audioProgressDetail.textContent = progress.detail || '';
+    this.audioProgressBar.value = total ? processed / total : 0;
+    this.audioProgressTime.textContent = `${this.formatAudioTime(processed)} / ${this.formatAudioTime(total)}`;
+  }
+
+  async cancelAudioAnalysis() {
+    if (this.btnAudioCancel.disabled) return;
+    this.btnAudioCancel.disabled = true;
+    this.audioAnalysisCancelled = true;
+    this.audioProgressDetail.textContent = '正在停止当前任务...';
+    await window.api.cancelAudioAnalysis();
   }
 
   renderAudioAnalysis(analysis, transcription) {
     if (!analysis) return;
+    const audio = analysis.audio || analysis;
+    const interaction = analysis.interaction || {};
+    const clarity = analysis.clarity || {};
+    const atmosphere = analysis.atmosphere || {};
     const speechPercent = Math.round((analysis.speechRatio || 0) * 100);
-    const interpretation = analysis.interpretation || {};
-    document.getElementById('audio-metric-duration').textContent = this.formatAudioTime(analysis.durationSeconds);
-    document.getElementById('audio-metric-speech').textContent = `${speechPercent}%`;
-    document.getElementById('audio-metric-silence').textContent = this.formatAudioTime(analysis.silenceSeconds);
+    const interpretation = audio.interpretation || {};
+    document.getElementById('audio-metric-duration').textContent = this.formatAudioTime(audio.durationSeconds);
+    document.getElementById('audio-metric-speech').textContent = `${Math.round((audio.speechRatio || 0) * 100)}%`;
+    document.getElementById('audio-metric-silence').textContent = this.formatAudioTime(audio.silenceSeconds);
     document.getElementById('audio-metric-energy').textContent = interpretation.energy || '--';
     const transcriptText = transcription?.text || '';
     this.audioAnalysisResult.innerHTML = `
-      <h3>氛围信号</h3>
-      <p>当前音频能量${interpretation.energy || '未知'}，停顿负荷${interpretation.pauseLoad || '未知'}，整体变化${interpretation.stability || '未知'}。</p>
-      <p>检测到 ${analysis.energyChangeCount || 0} 次明显能量变化，建议结合原文和时间点回听，不将其直接理解为情绪结论。</p>
-      ${this.renderAudioTimeline(analysis.timeline || [])}
+      <div class="analysis-summary-grid">
+        <div><span>整体氛围</span><strong>${atmosphere.label || '相对平稳'}</strong></div>
+        <div><span>表达语气</span><strong>${atmosphere.tone || interpretation.stability || '未知'}</strong></div>
+        <div><span>互动轮次</span><strong>${interaction.turnCount ?? '--'}</strong></div>
+        <div><span>参与均衡度</span><strong>${interaction.participationBalance == null ? '--' : `${Math.round(interaction.participationBalance * 100)}%`}</strong></div>
+      </div>
+      <h3>氛围与语气信号</h3>
+      <p>音频能量${interpretation.energy || '未知'}，停顿负荷${interpretation.pauseLoad || '未知'}，能量变化${audio.energyChangeCount || 0} 次，音高变化代理 ${audio.pitchVariationHz || 0} Hz。</p>
+      <p>正向/担忧/挫败/兴奋信号：${atmosphere.sentiment?.agreement || 0} / ${atmosphere.sentiment?.concern || 0} / ${atmosphere.sentiment?.frustration || 0} / ${atmosphere.sentiment?.excitement || 0}。这些是提示信号，不是情绪定论。</p>
+      <p>非语言线索：笑声 ${atmosphere.nonVerbal?.laughterCount || 0} 次，叹气/叹词 ${atmosphere.nonVerbal?.sighCount || 0} 次，犹豫音 ${atmosphere.nonVerbal?.hesitationCount || 0} 次。</p>
+      ${this.renderAudioTimeline(audio.timeline || [])}
+      ${this.renderInteractionSummary(interaction, clarity)}
       ${transcriptText ? `<h3>本地转写</h3><p>${this.escapeHtml(transcriptText)}</p>` : ''}
-      <p class="analysis-note">这是基于音量、静音和能量变化的本地基线分析。多人混合录音下，个人语气需要结合说话人分离结果复核。</p>
+      <p class="analysis-note">${audio.openSmile?.enabled ? '已启用 openSMILE eGeMAPS 个人声学特征。' : `openSMILE 未启用：${audio.openSmile?.error || '未配置'}。`} ${interaction.speakerCount > 1 && interaction.speakers?.some(item => item.acoustics) ? '个人声学指标已按说话人时间片段计算，但重叠语音和错误分离仍需回听复核。' : '当前还没有可用的说话人时间片段；独立声学分析不需要配置说话人分离，多人个人语气请点击“转写并分析”。'}</p>
     `;
+  }
+
+  renderInteractionSummary(interaction, clarity) {
+    const speakerRows = (interaction.speakers || []).map(item => {
+      const acoustics = item.acoustics;
+      const smile = item.openSmile;
+      const acousticText = acoustics
+        ? `${acoustics.toneSignal}<br>${acoustics.averagePitchHz || '--'} Hz / ${acoustics.averageRms || '--'}${smile ? `<br><small>eGeMAPS: ${smile.pitchMeanSemitone == null ? '--' : smile.pitchMeanSemitone} st</small>` : ''}`
+        : '无分离数据';
+      return `<tr><td>${this.escapeHtml(item.speaker)}</td><td>${item.turnCount}</td><td>${Math.round(item.participation * 100)}%</td><td>${item.wordsPerMinute} 字/分</td><td>${item.fillers}/${item.hedges}</td><td>${acousticText}</td></tr>`;
+    }).join('');
+    return `<h3>互动关系与表达清晰度</h3><p>说话人 ${interaction.speakerCount || 0} 位，打断/重叠 ${interaction.interruptions || 0} 次，重叠约 ${Number(interaction.overlapSeconds || 0).toFixed(1)} 秒，平均回应延迟 ${interaction.averageResponseDelaySeconds == null ? '未检测' : `${interaction.averageResponseDelaySeconds} 秒`}。</p><p>长句 ${clarity.longSentenceCount || 0} 个，填充词 ${clarity.fillerCount || 0} 个，犹豫词 ${clarity.hedgeCount || 0} 个，信息密度 ${Math.round((clarity.informationDensity || 0) * 100)}%。</p>${speakerRows ? `<table class="audio-speaker-table"><thead><tr><th>说话人</th><th>轮次</th><th>发言占比</th><th>语速代理</th><th>口癖/犹豫</th><th>个人声学</th></tr></thead><tbody>${speakerRows}</tbody></table>` : ''}`;
   }
 
   renderAudioTimeline(timeline) {
@@ -364,6 +437,7 @@ class ExpressionTrainer {
 
       if (result?.finalText) {
         if (result.recordingPath) this.pendingAudioPath = result.recordingPath;
+        this.speakerSegments = result.speakerSegments || [];
         const duration = this.stats.duration || 0;
         await this.loadTranscriptText(result.finalText, { duration, requestFeedback: false });
         this.awaitingFinalTranscript = false;
@@ -788,6 +862,7 @@ class ExpressionTrainer {
     await this.flushRealtimePhraseBuffer();
     const stopResult = await window.api.stopASR();
     if (stopResult?.recordingPath) this.pendingAudioPath = stopResult.recordingPath;
+    if (stopResult?.speakerSegments) this.speakerSegments = stopResult.speakerSegments;
     this.isRecording = false;
     this.isPaused = false;
     await window.api.markMeetingRecordingStopped();
@@ -1286,7 +1361,8 @@ class ExpressionTrainer {
     const result = await window.api.saveMeetingTranscript({
       transcript: this.fullText,
       stats: this.stats,
-      audioPath: this.pendingAudioPath
+      audioPath: this.pendingAudioPath,
+      speakerSegments: this.speakerSegments
     });
 
     if (result.success) {
@@ -1294,6 +1370,8 @@ class ExpressionTrainer {
       this.addFeedbackItem(`原始对话已保存：${result.sessionDir}`, 'good');
       if (result.audioPath && result.audioAnalysis) {
         const analysis = result.audioAnalysis;
+        const audio = analysis.audio || analysis;
+        const interpretation = audio.interpretation || {};
         this.setAudioFile({
           success: true,
           filePath: result.audioPath,
@@ -1301,7 +1379,7 @@ class ExpressionTrainer {
           name: 'meeting.wav'
         });
         this.renderAudioAnalysis(analysis);
-        this.addFeedbackItem(`本地音频分析已完成：能量${analysis.interpretation.energy}，静音占比${Math.round((1 - analysis.speechRatio) * 100)}%`, 'ai');
+        this.addFeedbackItem(`本地音频分析已完成：能量${interpretation.energy || '未知'}，静音占比${Math.round((1 - (audio.speechRatio || 0)) * 100)}%`, 'ai');
       }
     } else {
       this.addFeedbackItem(`保存原文失败：${result.error}`, 'filler');
@@ -1410,6 +1488,7 @@ class ExpressionTrainer {
     this.lastMinutes = '';
     this.meetingSession = null;
     this.pendingAudioPath = '';
+    this.speakerSegments = [];
     this.realtimePhraseBuffer = '';
     this.realtimePhraseLastAt = 0;
     this.subtitleContainer.innerHTML = '<div class="subtitle-line hint">点击下方按钮开始说话</div>';

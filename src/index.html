@@ -185,7 +185,9 @@
               <strong id="audio-file-name">拖入会议音频</strong>
               <span>支持 m4a、mp3、wav、aac、flac、ogg、webm</span>
               <button id="btn-audio-transcribe" class="btn-sm" disabled>转写并分析</button>
+              <button id="btn-audio-cancel" class="btn-sm hidden" disabled>取消分析</button>
             </div>
+            <div id="audio-analysis-progress" class="audio-analysis-progress hidden"><strong id="audio-progress-stage">准备分析</strong><span id="audio-progress-detail"></span><progress id="audio-progress-bar" max="1" value="0"></progress><span id="audio-progress-time">0 / 0 分钟</span></div>
             <div class="audio-player-card">
               <audio id="audio-player" controls></audio>
               <canvas id="audio-waveform" height="116"></canvas>

@@ -83,6 +83,15 @@ export QWEN3_ASR_PYTHON=/path/to/qwen3-asr/bin/python
 npm start
 ```
 
+如需启用逐说话人的 openSMILE eGeMAPS 特征，在同一个 Python 环境安装依赖，并配置该解释器：
+
+```bash
+/path/to/qwen3-asr/bin/pip install -U opensmile
+export OPENSMILE_PYTHON=/path/to/qwen3-asr/bin/python
+```
+
+如果未配置 `OPENSMILE_PYTHON`，应用会依次尝试 `QWEN3_ASR_PYTHON`、`PYTHON` 和系统 `python3`。openSMILE 不可用时，页面会显示原因并保留基础本地声学分析，不会阻塞转写。
+
 设置页的“Qwen3-ASR 模型路径或模型 ID”可以填写本地模型目录，也可以留空使用默认 `Qwen/Qwen3-ASR-1.7B`。首次使用模型 ID 时，`qwen-asr` 会按它自己的缓存规则下载模型；如果你希望完全本地离线，先把模型下载到本机目录，再把该目录填进设置页。
 
 下载后 `models/` 目录应包含：
@@ -123,6 +132,7 @@ npm start
 | 登录后自动启动应用 | 尽量避免忘记打开应用；应用启动后才能监听麦克风 |
 | 自动监听麦克风并发现会议 | 开启后后台监听音量，连续活跃达到阈值后开始录音 |
 | 录制系统输出声音 | 开启后会按 Native helper → 系统音频输入设备 → Electron loopback 的顺序捕获系统输出，并与麦克风混合转写 |
+| openSMILE 个人语气特征 | 需要在本机 Python 环境安装 `opensmile`；启用后按说话人片段提取 eGeMAPS 韵律、响度、jitter、shimmer 等特征 |
 | 麦克风输入设备 | 默认使用系统麦克风，也可指定某个输入设备 |
 | 系统音频输入设备 | Native helper 不可用时的兜底方案，可选择 BlackHole 2ch / Loopback 等虚拟声卡输入 |
 | 自动开始阈值 | 默认 60 秒，表示连续检测到麦克风输入 1 分钟后开始录音 |
@@ -242,6 +252,7 @@ npm run probe:system-audio
 │   ├── lexicon.js       # 词库匹配
 │   ├── ai-feedback.js   # AI反馈
 │   ├── meeting-session.js # 会议原文/报告归档
+│   ├── opensmile.js       # openSMILE 本地特征适配器
 │   └── prompts.js       # Prompt模板
 ├── native/
 │   └── system-audio-helper/ # macOS ScreenCaptureKit 系统音频 helper

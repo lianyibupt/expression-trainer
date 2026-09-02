@@ -4,7 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
-const { analyzeAudioFile } = require('../lib/audio-analysis');
+const { analyzeAudioFile, buildConversationAnalysis } = require('../lib/audio-analysis');
 
 function writeTestWav(filePath) {
   const sampleRate = 16000;
@@ -43,4 +43,45 @@ test('analyzeAudioFile reports duration, speech ratio, and pause load', () => {
   assert.equal(analysis.sampleRate, 16000);
   assert.equal(analysis.timeline.length, 1);
   assert.equal(analysis.timeline[0].label, '相对平稳');
+});
+
+test('buildConversationAnalysis combines sentiment, clarity, participation, and interaction signals', () => {
+  const result = buildConversationAnalysis({
+    durationSeconds: 20,
+    speechRatio: 0.8,
+    energyChangeCount: 4,
+    speechFrameCount: 100,
+    pitchVariationHz: 12,
+    timeline: [],
+    interpretation: { energy: '中等', pauseLoad: '常规', stability: '相对稳定' }
+  }, {
+    text: '说话人 1：我支持这个方案，下一步今天确定。\n说话人 2：我担心风险，可能需要再看一下。哈哈。',
+    speaker_segments: [
+      { speaker: '说话人 1', start: 0, end: 5, text: '我支持这个方案，下一步今天确定。' },
+      { speaker: '说话人 2', start: 5.5, end: 10, text: '我担心风险，可能需要再看一下。哈哈。' }
+    ]
+  });
+
+  assert.equal(result.atmosphere.sentiment.agreement, 1);
+  assert.equal(result.atmosphere.sentiment.concern, 2);
+  assert.equal(result.atmosphere.nonVerbal.laughterCount, 1);
+  assert.equal(result.interaction.speakerCount, 2);
+  assert.equal(result.interaction.turnCount, 2);
+  assert.equal(result.clarity.hedgeCount, 1);
+});
+
+test('analyzeAudioFile computes per-speaker acoustic stats from diarized segments', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'expression-speaker-analysis-'));
+  const filePath = path.join(dir, 'meeting.wav');
+  writeTestWav(filePath);
+
+  const analysis = analyzeAudioFile(filePath, [
+    { speaker: '说话人 1', start: 0.5, end: 1.1, text: '我支持。' },
+    { speaker: '说话人 2', start: 1.2, end: 1.8, text: '我担心风险。' }
+  ]);
+
+  assert.equal(analysis.speakerAcoustics.speakers.length, 2);
+  assert.equal(analysis.speakerAcoustics.segmentDetails.length, 2);
+  assert.ok(analysis.speakerAcoustics.speakers[0].averageRms > 0);
+  assert.ok(Number.isFinite(analysis.speakerAcoustics.speakers[0].averagePitchHz));
 });

@@ -63,4 +63,10 @@ contextBridge.exposeInMainWorld('api', {
   saveMeetingMinutes: (payload) => ipcRenderer.invoke('save-meeting-minutes', payload),
   selectAudioFile: () => ipcRenderer.invoke('select-audio-file'),
   analyzeAudioFile: (payload) => ipcRenderer.invoke('analyze-audio-file', payload),
+  transcribeAudioFile: (payload) => ipcRenderer.invoke('transcribe-audio-file', payload),
+  cancelAudioAnalysis: () => ipcRenderer.invoke('cancel-audio-analysis'),
+  onAudioAnalysisProgress: (callback) => {
+    ipcRenderer.on('audio-analysis-progress', (event, data) => callback(data));
+  },
+  removeAudioAnalysisProgressListener: () => ipcRenderer.removeAllListeners('audio-analysis-progress'),
 });
