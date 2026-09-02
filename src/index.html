@@ -30,12 +30,20 @@
           <span class="stage-index">02</span>
           <span class="stage-label">会议原文</span>
         </button>
-        <button class="stage-tab" data-stage="optimize">
+        <button class="stage-tab" data-stage="minutes">
           <span class="stage-index">03</span>
+          <span class="stage-label">会议纪要</span>
+        </button>
+        <button class="stage-tab" data-stage="optimize">
+          <span class="stage-index">04</span>
           <span class="stage-label">表达优化</span>
         </button>
+        <button class="stage-tab" data-stage="audio">
+          <span class="stage-index">05</span>
+          <span class="stage-label">音频分析</span>
+        </button>
         <button class="stage-tab" data-stage="report">
-          <span class="stage-index">04</span>
+          <span class="stage-index">06</span>
           <span class="stage-label">报告</span>
         </button>
 
@@ -102,6 +110,25 @@
 
           <div class="transcript-actions">
             <button id="btn-analyze-paste" class="btn-primary">分析当前原文</button>
+            <button id="btn-go-minutes" class="btn-secondary">进入会议纪要</button>
+          </div>
+        </section>
+
+        <section class="stage-panel" data-panel="minutes">
+          <div class="panel-heading">
+            <div>
+              <p class="panel-eyebrow">Minutes</p>
+              <h2>会议纪要</h2>
+            </div>
+            <div class="stage-actions">
+              <button id="btn-copy-minutes" class="btn-sm hidden">复制全文</button>
+              <button id="btn-save-minutes" class="btn-sm hidden">保存</button>
+              <button id="btn-generate-minutes" class="btn-primary">生成纪要</button>
+            </div>
+          </div>
+
+          <div id="minutes-body" class="report-body">
+            <p class="empty-state">完成录音或粘贴原文后，可以在这里生成正式会议纪要。</p>
           </div>
         </section>
 
@@ -136,6 +163,42 @@
             <div class="feedback-panel">
               <div class="feedback-title">实时反馈</div>
               <div id="feedback-content" class="feedback-content"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="stage-panel audio-panel" data-panel="audio">
+          <div class="panel-heading">
+            <div>
+              <p class="panel-eyebrow">Audio Lab</p>
+              <h2>音频分析</h2>
+            </div>
+            <div class="stage-actions">
+              <button id="btn-audio-select" class="btn-primary">选择音频</button>
+              <button id="btn-audio-analyze" class="btn-secondary" disabled>开始分析</button>
+            </div>
+          </div>
+
+          <div class="audio-workspace">
+            <div id="audio-dropzone" class="audio-dropzone">
+              <div class="audio-drop-icon">◒</div>
+              <strong id="audio-file-name">拖入会议音频</strong>
+              <span>支持 m4a、mp3、wav、aac、flac、ogg、webm</span>
+              <button id="btn-audio-transcribe" class="btn-sm" disabled>转写并分析</button>
+            </div>
+            <div class="audio-player-card">
+              <audio id="audio-player" controls></audio>
+              <canvas id="audio-waveform" height="116"></canvas>
+              <div class="audio-time-row"><span id="audio-current-time">00:00</span><span id="audio-duration">00:00</span></div>
+            </div>
+            <div id="audio-metrics" class="audio-metrics">
+              <div class="audio-metric"><span>时长</span><strong id="audio-metric-duration">--</strong></div>
+              <div class="audio-metric"><span>有效发言</span><strong id="audio-metric-speech">--</strong></div>
+              <div class="audio-metric"><span>静音时长</span><strong id="audio-metric-silence">--</strong></div>
+              <div class="audio-metric"><span>能量水平</span><strong id="audio-metric-energy">--</strong></div>
+            </div>
+            <div id="audio-analysis-result" class="audio-analysis-result">
+              <p class="empty-state">选择音频后，可以查看波形并触发本地分析。</p>
             </div>
           </div>
         </section>

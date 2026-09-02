@@ -171,6 +171,9 @@ Documents/Expression Trainer Meetings/
 └── 2026-08-03-091011/
     ├── transcript.md   # 原始对话
     ├── report.md       # 对话分析报告
+    ├── meeting.wav     # 本地保存的 16kHz 单声道会议录音
+    ├── audio-analysis.json # 本地声学指标
+    └── audio-analysis.md   # 可读的音频分析摘要
     └── metadata.json   # 时长、字数、文件索引等元数据
 ```
 

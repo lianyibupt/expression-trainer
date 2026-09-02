@@ -4,7 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
-const { createMeetingArtifacts, createTranscriptArtifact, saveReportArtifact } = require('../lib/meeting-session');
+const { createMeetingArtifacts, createTranscriptArtifact, saveMinutesArtifact, saveReportArtifact, saveAudioArtifact } = require('../lib/meeting-session');
 
 test('createMeetingArtifacts saves transcript, report, and metadata in a session folder', () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'expression-session-'));
@@ -71,4 +71,57 @@ test('transcript and report can be saved in two separate steps', () => {
   const metadata = JSON.parse(fs.readFileSync(transcriptResult.metadataPath, 'utf8'));
   assert.equal(metadata.files.transcript, 'transcript.md');
   assert.equal(metadata.files.report, 'report.md');
+});
+
+test('minutes can be saved and updated in an existing session folder', () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'expression-session-'));
+  const transcriptResult = createTranscriptArtifact({
+    rootDir,
+    now: new Date(2026, 7, 11, 18, 10, 11),
+    transcript: '会议原文',
+    stats: { duration: 30, totalWords: 8 }
+  });
+
+  const first = saveMinutesArtifact({
+    sessionDir: transcriptResult.sessionDir,
+    minutes: '# 会议纪要\n\n第一版',
+    stats: { duration: 30, totalWords: 8 }
+  });
+  const second = saveMinutesArtifact({
+    sessionDir: transcriptResult.sessionDir,
+    minutes: '# 会议纪要\n\n第二版',
+    stats: { duration: 30, totalWords: 8 }
+  });
+
+  assert.equal(first.minutesPath, path.join(transcriptResult.sessionDir, 'minutes.md'));
+  assert.equal(second.minutesPath, first.minutesPath);
+  assert.match(fs.readFileSync(first.minutesPath, 'utf8'), /第二版/);
+
+  const metadata = JSON.parse(fs.readFileSync(transcriptResult.metadataPath, 'utf8'));
+  assert.equal(metadata.files.minutes, 'minutes.md');
+});
+
+test('audio artifact copies the recording and stores local analysis metadata', () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'expression-session-'));
+  const sourcePath = path.join(rootDir, 'source.wav');
+  fs.writeFileSync(sourcePath, Buffer.from('wav-test'));
+  const transcriptResult = createTranscriptArtifact({
+    rootDir,
+    transcript: '会议原文',
+    stats: { duration: 2 }
+  });
+  const analysis = { version: 1, speechRatio: 0.5 };
+
+  const result = saveAudioArtifact({
+    sessionDir: transcriptResult.sessionDir,
+    audioPath: sourcePath,
+    audioAnalysis: analysis
+  });
+
+  assert.equal(fs.readFileSync(result.audioPath, 'utf8'), 'wav-test');
+  assert.deepEqual(JSON.parse(fs.readFileSync(result.audioAnalysisPath, 'utf8')), analysis);
+  assert.match(fs.readFileSync(result.audioAnalysisMarkdownPath, 'utf8'), /有效发言占比：50%/);
+  const metadata = JSON.parse(fs.readFileSync(transcriptResult.metadataPath, 'utf8'));
+  assert.equal(metadata.files.audio, 'meeting.wav');
+  assert.equal(metadata.files.audioAnalysis, 'audio-analysis.json');
 });

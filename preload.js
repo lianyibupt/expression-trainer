@@ -53,10 +53,14 @@ contextBridge.exposeInMainWorld('api', {
   // AI反馈
   getRealtimeFeedback: (text) => ipcRenderer.invoke('get-realtime-feedback', text),
   getFinalReport: (data) => ipcRenderer.invoke('get-final-report', data),
+  getMeetingMinutes: (data) => ipcRenderer.invoke('get-meeting-minutes', data),
   testLLMConnection: (settings) => ipcRenderer.invoke('test-llm-connection', settings),
 
   // 文件保存
   saveFile: (content, filename) => ipcRenderer.invoke('save-file', content, filename),
   saveMeetingTranscript: (payload) => ipcRenderer.invoke('save-meeting-transcript', payload),
   saveMeetingReport: (payload) => ipcRenderer.invoke('save-meeting-report', payload),
+  saveMeetingMinutes: (payload) => ipcRenderer.invoke('save-meeting-minutes', payload),
+  selectAudioFile: () => ipcRenderer.invoke('select-audio-file'),
+  analyzeAudioFile: (payload) => ipcRenderer.invoke('analyze-audio-file', payload),
 });

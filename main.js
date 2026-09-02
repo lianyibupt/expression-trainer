@@ -2,11 +2,13 @@ const { app, BrowserWindow, ipcMain, session, Menu, desktopCapturer } = require(
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
-const { initASR, feedAudio, stopRecognition } = require('./lib/asr');
+const { initASR, feedAudio, stopRecognition, transcribeAudioFile } = require('./lib/asr');
 const { loadLexicon, analyzeText } = require('./lib/lexicon');
-const { sendFeedback, sendReport, testConnection } = require('./lib/ai-feedback');
-const { createTranscriptArtifact, saveReportArtifact } = require('./lib/meeting-session');
+const { sendFeedback, sendReport, sendMeetingMinutes, testConnection } = require('./lib/ai-feedback');
+const { createTranscriptArtifact, saveMinutesArtifact, saveReportArtifact, saveAudioArtifact } = require('./lib/meeting-session');
+const { analyzeAudioFile } = require('./lib/audio-analysis');
 const { MeetingActivityDetector } = require('./lib/meeting-activity-detector');
+const { pathToFileURL } = require('url');
 
 app.commandLine.appendSwitch('enable-features', [
   'MacLoopbackAudioForScreenShare',
@@ -25,6 +27,24 @@ let asrReady = false;
 let displayMediaHandlerReady = false;
 let nativeSystemAudioProcess = null;
 const meetingActivityDetector = new MeetingActivityDetector();
+
+function normalizeAudioFile(inputPath) {
+  return new Promise((resolve, reject) => {
+    const tempDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'expression-trainer-upload-'));
+    const outputPath = path.join(tempDir, 'audio.wav');
+    const child = spawn('ffmpeg', ['-y', '-i', inputPath, '-ac', '1', '-ar', '16000', '-sample_fmt', 's16', outputPath], {
+      stdio: ['ignore', 'ignore', 'pipe']
+    });
+    let stderr = '';
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', chunk => { stderr += chunk; });
+    child.on('error', error => reject(error));
+    child.on('exit', code => {
+      if (code === 0 && fs.existsSync(outputPath)) resolve({ outputPath, tempDir });
+      else reject(new Error(stderr.trim() || `ffmpeg 转码失败，退出码 ${code}`));
+    });
+  });
+}
 
 // Custom prompt 文件路径
 function getCustomPromptPath() {
@@ -583,19 +603,62 @@ ipcMain.handle('save-file', async (event, content, filename) => {
   return { success: false };
 });
 
-ipcMain.handle('save-meeting-transcript', async (event, { transcript, stats }) => {
+ipcMain.handle('select-audio-file', async () => {
+  const { dialog } = require('electron');
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: '选择会议音频',
+    properties: ['openFile'],
+    filters: [{ name: '音频文件', extensions: ['m4a', 'mp3', 'wav', 'aac', 'flac', 'ogg', 'webm'] }]
+  });
+  if (result.canceled || !result.filePaths[0]) return { success: false, canceled: true };
+  const filePath = result.filePaths[0];
+  return { success: true, filePath, fileUrl: pathToFileURL(filePath).href, name: path.basename(filePath) };
+});
+
+ipcMain.handle('analyze-audio-file', async (event, { filePath, transcribe = false }) => {
+  let normalized;
+  try {
+    normalized = await normalizeAudioFile(filePath);
+    const audioAnalysis = analyzeAudioFile(normalized.outputPath);
+    let transcription = null;
+    if (transcribe) {
+      const settings = loadSettings();
+      const model = settings.asr?.qwen3ModelPath || settings.asr?.finalModelPath || undefined;
+      transcription = await transcribeAudioFile(normalized.outputPath, model, {
+        speakerDiarization: settings.asr?.speakerDiarization !== false
+      });
+    }
+    return { success: true, audioAnalysis, transcription, normalizedPath: normalized.outputPath };
+  } catch (error) {
+    return { success: false, error: error.message };
+  } finally {
+    if (normalized?.tempDir) fs.rmSync(normalized.tempDir, { recursive: true, force: true });
+  }
+});
+
+ipcMain.handle('save-meeting-transcript', async (event, { transcript, stats, audioPath }) => {
   const settings = loadSettings();
   const rootDir = getMeetingOutputDir(settings);
 
   try {
+    const transcriptResult = createTranscriptArtifact({
+      rootDir,
+      transcript,
+      stats,
+      now: new Date()
+    });
+    if (!audioPath) return { success: true, ...transcriptResult };
+
+    const audioAnalysis = analyzeAudioFile(audioPath);
+    const audioResult = saveAudioArtifact({
+      sessionDir: transcriptResult.sessionDir,
+      audioPath,
+      audioAnalysis
+    });
     return {
       success: true,
-      ...createTranscriptArtifact({
-        rootDir,
-        transcript,
-        stats,
-        now: new Date()
-      })
+      ...transcriptResult,
+      ...audioResult
     };
   } catch (error) {
     return { success: false, error: error.message };
@@ -612,6 +675,23 @@ ipcMain.handle('save-meeting-report', async (event, { sessionDir, transcript, re
         report,
         stats,
         createdAt,
+        now: new Date()
+      })
+    };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('save-meeting-minutes', async (event, { sessionDir, transcript, minutes, stats }) => {
+  try {
+    return {
+      success: true,
+      ...saveMinutesArtifact({
+        sessionDir,
+        transcript,
+        minutes,
+        stats,
         now: new Date()
       })
     };
@@ -640,6 +720,18 @@ ipcMain.handle('get-final-report', async (event, { fullText, stats }) => {
   try {
     const report = await sendReport(fullText, stats, { ...settings, ...providerConfig }, customPrompt);
     return { success: true, report };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('get-meeting-minutes', async (event, { fullText, stats }) => {
+  const settings = loadSettings();
+  const providerConfig = getCurrentProviderSettings(settings);
+  const customPrompt = loadCustomPrompt();
+  try {
+    const minutes = await sendMeetingMinutes(fullText, stats, { ...settings, ...providerConfig }, customPrompt);
+    return { success: true, minutes };
   } catch (error) {
     return { success: false, error: error.message };
   }

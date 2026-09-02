@@ -13,8 +13,10 @@ class ExpressionTrainer {
     this.stats = { fillers: 0, hedges: 0, vagueWords: 0, totalWords: 0, duration: 0 };
     this.lastFeedbackText = '';
     this.lastReport = '';
+    this.lastMinutes = '';
     this.settings = null;
     this.meetingSession = null;
+    this.pendingAudioPath = '';
     this.isStoppingRecording = false;
     this.activityMonitor = null;
     this.lastActivityUpdateAt = 0;
@@ -55,10 +57,25 @@ class ExpressionTrainer {
     this.btnReviewReport = document.getElementById('btn-review-report');
     this.btnClosePaste = document.getElementById('btn-close-paste');
     this.btnAnalyzePaste = document.getElementById('btn-analyze-paste');
+    this.btnGoMinutes = document.getElementById('btn-go-minutes');
     this.btnCopyText = document.getElementById('btn-copy-text');
     this.btnSaveText = document.getElementById('btn-save-text');
     this.btnClear = document.getElementById('btn-clear');
     this.btnCopyReport = document.getElementById('btn-copy-report');
+    this.btnGenerateMinutes = document.getElementById('btn-generate-minutes');
+    this.btnCopyMinutes = document.getElementById('btn-copy-minutes');
+    this.btnSaveMinutes = document.getElementById('btn-save-minutes');
+    this.btnAudioSelect = document.getElementById('btn-audio-select');
+    this.btnAudioAnalyze = document.getElementById('btn-audio-analyze');
+    this.btnAudioTranscribe = document.getElementById('btn-audio-transcribe');
+    this.audioDropzone = document.getElementById('audio-dropzone');
+    this.audioFileName = document.getElementById('audio-file-name');
+    this.audioPlayer = document.getElementById('audio-player');
+    this.audioWaveform = document.getElementById('audio-waveform');
+    this.audioCurrentTime = document.getElementById('audio-current-time');
+    this.audioDuration = document.getElementById('audio-duration');
+    this.audioAnalysisResult = document.getElementById('audio-analysis-result');
+    this.audioFile = null;
     this.pasteModal = document.getElementById('paste-modal');
     this.pasteTextarea = document.getElementById('paste-textarea');
     this.transcriptEditor = document.getElementById('transcript-editor');
@@ -71,6 +88,7 @@ class ExpressionTrainer {
     this.feedbackContent = document.getElementById('feedback-content');
     this.reportModal = document.getElementById('report-modal');
     this.reportBody = document.getElementById('report-body');
+    this.minutesBody = document.getElementById('minutes-body');
     this.statFillers = document.getElementById('stat-fillers');
     this.statHedges = document.getElementById('stat-hedges');
     this.statVague = document.getElementById('stat-vague');
@@ -87,6 +105,7 @@ class ExpressionTrainer {
     this.btnResume.addEventListener('click', () => this.resumeRecording());
     this.btnStop.addEventListener('click', () => this.stopRecording());
     this.btnReport.addEventListener('click', () => this.generateReport());
+    this.btnGenerateMinutes.addEventListener('click', () => this.generateMinutes());
     this.btnSettings.addEventListener('click', () => window.api.openSettings());
     document.getElementById('btn-prompt-editor').addEventListener('click', () => window.api.openPromptEditor());
     this.btnCloseReport.addEventListener('click', () => this.reportModal.classList.add('hidden'));
@@ -101,8 +120,38 @@ class ExpressionTrainer {
         setTimeout(() => { this.btnCopyReport.textContent = '复制全文'; }, 2000);
       });
     });
+    this.btnCopyMinutes.addEventListener('click', () => {
+      if (!this.lastMinutes) return;
+      navigator.clipboard.writeText(this.lastMinutes).then(() => {
+        this.btnCopyMinutes.textContent = '已复制';
+        setTimeout(() => { this.btnCopyMinutes.textContent = '复制全文'; }, 2000);
+      });
+    });
+    this.btnSaveMinutes.addEventListener('click', () => this.saveMinutes());
+    this.btnAudioSelect.addEventListener('click', () => this.selectAudioFile());
+    this.btnAudioAnalyze.addEventListener('click', () => this.runAudioAnalysis(false));
+    this.btnAudioTranscribe.addEventListener('click', () => this.runAudioAnalysis(true));
+    ['dragenter', 'dragover'].forEach(type => this.audioDropzone.addEventListener(type, event => {
+      event.preventDefault();
+      this.audioDropzone.classList.add('dragging');
+    }));
+    ['dragleave', 'drop'].forEach(type => this.audioDropzone.addEventListener(type, event => {
+      event.preventDefault();
+      this.audioDropzone.classList.remove('dragging');
+    }));
+    this.audioDropzone.addEventListener('drop', event => this.handleAudioDrop(event));
+    this.audioPlayer.addEventListener('loadedmetadata', () => {
+      this.audioDuration.textContent = this.formatAudioTime(this.audioPlayer.duration);
+      this.drawAudioWaveform();
+    });
+    this.audioPlayer.addEventListener('timeupdate', () => {
+      this.audioCurrentTime.textContent = this.formatAudioTime(this.audioPlayer.currentTime);
+      this.drawAudioWaveform();
+    });
+    this.audioWaveform.addEventListener('click', event => this.seekAudio(event));
     this.btnClosePaste.addEventListener('click', () => this.pasteModal.classList.add('hidden'));
     this.btnAnalyzePaste.addEventListener('click', () => this.analyzePastedText());
+    this.btnGoMinutes.addEventListener('click', () => this.goToMinutes());
     this.btnCopyText.addEventListener('click', () => this.copyOriginalText());
     this.btnSaveText.addEventListener('click', () => this.saveOriginalText());
     this.btnClear.addEventListener('click', () => this.clearAll());
@@ -137,6 +186,141 @@ class ExpressionTrainer {
 
   handleTranscriptEditorInput() {
     this.updateTextActionVisibility();
+    this.lastMinutes = '';
+    this.btnCopyMinutes.classList.add('hidden');
+    this.btnSaveMinutes.classList.add('hidden');
+    this.minutesBody.innerHTML = '<p class="empty-state">原文已修改，请重新生成会议纪要。</p>';
+    this.btnGenerateMinutes.textContent = '生成纪要';
+  }
+
+  goToMinutes() {
+    const text = this.transcriptEditor.value.trim() || this.fullText.trim();
+    if (!text) {
+      this.addFeedbackItem('先录制或粘贴一段会议原文，再进入会议纪要', 'filler');
+      this.transcriptEditor.focus();
+      return;
+    }
+    this.switchStage('minutes');
+  }
+
+  formatAudioTime(seconds) {
+    if (!Number.isFinite(seconds)) return '00:00';
+    const total = Math.max(0, Math.floor(seconds));
+    return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+  }
+
+  async selectAudioFile() {
+    const result = await window.api.selectAudioFile();
+    if (result?.success) this.setAudioFile(result);
+  }
+
+  handleAudioDrop(event) {
+    const file = event.dataTransfer?.files?.[0];
+    if (!file?.path) {
+      this.audioAnalysisResult.innerHTML = '<p class="analysis-error">无法读取拖入文件，请使用“选择音频”。</p>';
+      return;
+    }
+    this.setAudioFile({ success: true, filePath: file.path, fileUrl: URL.createObjectURL(file), name: file.name });
+  }
+
+  setAudioFile(file) {
+    this.audioFile = file;
+    this.audioFileName.textContent = file.name || file.filePath;
+    this.audioDropzone.classList.add('has-file');
+    this.audioPlayer.src = file.fileUrl || `file://${file.filePath}`;
+    this.audioPlayer.load();
+    this.btnAudioAnalyze.disabled = false;
+    this.btnAudioTranscribe.disabled = false;
+    this.audioAnalysisResult.innerHTML = '<p class="empty-state">音频已载入。可以先播放预览，再选择分析方式。</p>';
+  }
+
+  drawAudioWaveform() {
+    const canvas = this.audioWaveform;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const width = Math.max(1, Math.floor(rect.width || 640));
+    const height = canvas.height;
+    const ratio = window.devicePixelRatio || 1;
+    canvas.width = width * ratio;
+    canvas.height = height * ratio;
+    const context = canvas.getContext('2d');
+    context.scale(ratio, ratio);
+    context.clearRect(0, 0, width, height);
+    const progress = this.audioPlayer.duration ? this.audioPlayer.currentTime / this.audioPlayer.duration : 0;
+    const bars = Math.max(30, Math.floor(width / 5));
+    for (let i = 0; i < bars; i++) {
+      const wave = 0.22 + Math.abs(Math.sin(i * 0.71) * 0.45) + Math.abs(Math.sin(i * 0.17) * 0.22);
+      const barHeight = Math.min(height * 0.82, Math.max(4, wave * height * 0.58));
+      const x = i * width / bars;
+      context.fillStyle = i / bars <= progress ? '#e5007e' : '#394149';
+      context.fillRect(x, (height - barHeight) / 2, Math.max(2, width / bars - 2), barHeight);
+    }
+  }
+
+  seekAudio(event) {
+    if (!this.audioPlayer.duration) return;
+    const rect = this.audioWaveform.getBoundingClientRect();
+    this.audioPlayer.currentTime = ((event.clientX - rect.left) / rect.width) * this.audioPlayer.duration;
+  }
+
+  async runAudioAnalysis(transcribe) {
+    if (!this.audioFile?.filePath) return;
+    this.btnAudioAnalyze.disabled = true;
+    this.btnAudioTranscribe.disabled = true;
+    this.audioAnalysisResult.innerHTML = `<p class="empty-state">正在${transcribe ? '转写并分析' : '分析音频'}，全程在本机执行...</p>`;
+    this.setSessionStatus('本地音频分析中');
+    try {
+      const result = await window.api.analyzeAudioFile({ filePath: this.audioFile.filePath, transcribe });
+      if (!result.success) throw new Error(result.error || '音频分析失败');
+      this.renderAudioAnalysis(result.audioAnalysis, result.transcription);
+      this.setSessionStatus('音频分析完成');
+    } catch (error) {
+      this.audioAnalysisResult.innerHTML = `<p class="analysis-error">分析失败：${error.message}</p>`;
+      this.setSessionStatus('音频分析失败');
+    } finally {
+      this.btnAudioAnalyze.disabled = false;
+      this.btnAudioTranscribe.disabled = false;
+    }
+  }
+
+  renderAudioAnalysis(analysis, transcription) {
+    if (!analysis) return;
+    const speechPercent = Math.round((analysis.speechRatio || 0) * 100);
+    const interpretation = analysis.interpretation || {};
+    document.getElementById('audio-metric-duration').textContent = this.formatAudioTime(analysis.durationSeconds);
+    document.getElementById('audio-metric-speech').textContent = `${speechPercent}%`;
+    document.getElementById('audio-metric-silence').textContent = this.formatAudioTime(analysis.silenceSeconds);
+    document.getElementById('audio-metric-energy').textContent = interpretation.energy || '--';
+    const transcriptText = transcription?.text || '';
+    this.audioAnalysisResult.innerHTML = `
+      <h3>氛围信号</h3>
+      <p>当前音频能量${interpretation.energy || '未知'}，停顿负荷${interpretation.pauseLoad || '未知'}，整体变化${interpretation.stability || '未知'}。</p>
+      <p>检测到 ${analysis.energyChangeCount || 0} 次明显能量变化，建议结合原文和时间点回听，不将其直接理解为情绪结论。</p>
+      ${this.renderAudioTimeline(analysis.timeline || [])}
+      ${transcriptText ? `<h3>本地转写</h3><p>${this.escapeHtml(transcriptText)}</p>` : ''}
+      <p class="analysis-note">这是基于音量、静音和能量变化的本地基线分析。多人混合录音下，个人语气需要结合说话人分离结果复核。</p>
+    `;
+  }
+
+  renderAudioTimeline(timeline) {
+    if (!timeline.length) return '';
+    const items = timeline.map(item => {
+      const width = Math.max(3, ((item.endSeconds - item.startSeconds) / Math.max(1, this.audioPlayer.duration || item.endSeconds)) * 100);
+      return `<button class="audio-timeline-item" style="width:${width}%" data-audio-seek="${item.startSeconds}" title="${this.formatAudioTime(item.startSeconds)} ${item.label}"><span></span></button>`;
+    }).join('');
+    setTimeout(() => {
+      this.audioAnalysisResult.querySelectorAll('[data-audio-seek]').forEach(item => {
+        item.addEventListener('click', () => {
+          this.audioPlayer.currentTime = Number(item.dataset.audioSeek);
+          this.audioPlayer.play();
+        });
+      });
+    }, 0);
+    return `<h3>氛围变化时间线</h3><div class="audio-timeline">${items}</div><div class="audio-timeline-caption">每格约 30 秒，点击任意区间回听</div>`;
+  }
+
+  escapeHtml(text) {
+    return String(text).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
   }
 
   bindNativeSystemAudioEvents() {
@@ -179,6 +363,7 @@ class ExpressionTrainer {
       }
 
       if (result?.finalText) {
+        if (result.recordingPath) this.pendingAudioPath = result.recordingPath;
         const duration = this.stats.duration || 0;
         await this.loadTranscriptText(result.finalText, { duration, requestFeedback: false });
         this.awaitingFinalTranscript = false;
@@ -542,12 +727,17 @@ class ExpressionTrainer {
     this.sentences = [];
     this.meetingSession = null;
     this.lastReport = '';
+    this.lastMinutes = '';
     this.realtimePhraseBuffer = '';
     this.realtimePhraseLastAt = 0;
     this.resetStats();
     this.subtitleContainer.innerHTML = '';
     this.syncTranscriptEditor();
     this.reportBody.innerHTML = '<p class="empty-state">完成录制或粘贴原文后，可以在这里生成表达分析报告。</p>';
+    this.minutesBody.innerHTML = '<p class="empty-state">完成录音或粘贴原文后，可以在这里生成正式会议纪要。</p>';
+    this.btnCopyMinutes.classList.add('hidden');
+    this.btnSaveMinutes.classList.add('hidden');
+    this.btnGenerateMinutes.textContent = '生成纪要';
 
     // UI
     this.btnStart.classList.add('hidden');
@@ -597,6 +787,7 @@ class ExpressionTrainer {
     this.nativeSystemAudioQueuedSamples = 0;
     await this.flushRealtimePhraseBuffer();
     const stopResult = await window.api.stopASR();
+    if (stopResult?.recordingPath) this.pendingAudioPath = stopResult.recordingPath;
     this.isRecording = false;
     this.isPaused = false;
     await window.api.markMeetingRecordingStopped();
@@ -962,6 +1153,86 @@ class ExpressionTrainer {
     }
   }
 
+  async generateMinutes() {
+    const editorText = this.transcriptEditor.value.trim();
+    if (!editorText) {
+      this.switchStage('transcript');
+      this.transcriptEditor.focus();
+      this.addFeedbackItem('先录制或粘贴一段会议原文，再生成会议纪要', 'filler');
+      return;
+    }
+
+    if (editorText !== this.fullText.trim()) {
+      await this.loadTranscriptText(editorText, { duration: this.stats.duration || 0, requestFeedback: false });
+    }
+
+    this.switchStage('minutes');
+    this.setSessionStatus('生成纪要中');
+    const previousMinutes = this.lastMinutes;
+    this.minutesBody.innerHTML = '<p class="empty-state">正在整理会议纪要...</p>';
+    this.btnGenerateMinutes.disabled = true;
+
+    try {
+      const result = await window.api.getMeetingMinutes({
+        fullText: this.fullText,
+        stats: this.stats
+      });
+
+      if (!result.success || !result.minutes) {
+        throw new Error(result.error || '会议纪要生成失败');
+      }
+
+      this.lastMinutes = result.minutes;
+      this.renderMinutes(result.minutes);
+      this.btnGenerateMinutes.textContent = '重新生成';
+      this.setSessionStatus('纪要已生成');
+      await this.saveMeetingMinutesArtifact(result.minutes);
+    } catch (error) {
+      this.minutesBody.innerHTML = previousMinutes
+        ? this.renderMarkdown(previousMinutes)
+        : `<p style="color:#ff6b6b;">生成失败：${error.message}</p>`;
+      this.setSessionStatus('纪要生成失败');
+      this.addFeedbackItem(`会议纪要生成失败：${error.message}`, 'filler');
+    } finally {
+      this.btnGenerateMinutes.disabled = false;
+    }
+  }
+
+  renderMarkdown(markdown) {
+    return String(markdown || '')
+      .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+      .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+      .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
+      .replace(/\n/g, '<br>');
+  }
+
+  renderMinutes(minutes) {
+    this.minutesBody.innerHTML = this.renderMarkdown(minutes);
+    this.btnCopyMinutes.classList.remove('hidden');
+    this.btnSaveMinutes.classList.remove('hidden');
+  }
+
+  async saveMinutes() {
+    if (!this.lastMinutes) return;
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10);
+    const timeStr = now.toTimeString().slice(0, 5).replace(':', '');
+    const filename = `会议纪要-${dateStr}-${timeStr}.md`;
+
+    try {
+      const result = await window.api.saveFile(this.lastMinutes, filename);
+      if (result.success) {
+        this.btnSaveMinutes.textContent = '已保存';
+        setTimeout(() => { this.btnSaveMinutes.textContent = '保存'; }, 2000);
+      }
+    } catch (error) {
+      this.addFeedbackItem(`会议纪要保存失败：${error.message}`, 'filler');
+    }
+  }
+
   renderReport(report) {
     let html = report
       .replace(/^### (.+)$/gm, '<h3>$1</h3>')
@@ -1014,12 +1285,24 @@ class ExpressionTrainer {
 
     const result = await window.api.saveMeetingTranscript({
       transcript: this.fullText,
-      stats: this.stats
+      stats: this.stats,
+      audioPath: this.pendingAudioPath
     });
 
     if (result.success) {
       this.meetingSession = result;
       this.addFeedbackItem(`原始对话已保存：${result.sessionDir}`, 'good');
+      if (result.audioPath && result.audioAnalysis) {
+        const analysis = result.audioAnalysis;
+        this.setAudioFile({
+          success: true,
+          filePath: result.audioPath,
+          fileUrl: `file://${result.audioPath}`,
+          name: 'meeting.wav'
+        });
+        this.renderAudioAnalysis(analysis);
+        this.addFeedbackItem(`本地音频分析已完成：能量${analysis.interpretation.energy}，静音占比${Math.round((1 - analysis.speechRatio) * 100)}%`, 'ai');
+      }
     } else {
       this.addFeedbackItem(`保存原文失败：${result.error}`, 'filler');
     }
@@ -1041,6 +1324,25 @@ class ExpressionTrainer {
       this.addFeedbackItem(`分析报告已保存：${result.reportPath}`, 'good');
     } else {
       this.addFeedbackItem(`保存报告失败：${result.error}`, 'filler');
+    }
+  }
+
+  async saveMeetingMinutesArtifact(minutes) {
+    const settings = await this.getSettings();
+    if (!settings?.meeting?.autoSaveArtifacts || !this.meetingSession?.sessionDir) return;
+
+    const result = await window.api.saveMeetingMinutes({
+      sessionDir: this.meetingSession.sessionDir,
+      transcript: this.fullText,
+      minutes,
+      stats: this.stats
+    });
+
+    if (result.success) {
+      this.meetingSession = { ...this.meetingSession, ...result };
+      this.addFeedbackItem(`会议纪要已保存：${result.minutesPath}`, 'good');
+    } else {
+      this.addFeedbackItem(`会议纪要保存失败：${result.error}`, 'filler');
     }
   }
 
@@ -1105,12 +1407,18 @@ class ExpressionTrainer {
     this.fullText = '';
     this.sentences = [];
     this.lastReport = '';
+    this.lastMinutes = '';
     this.meetingSession = null;
+    this.pendingAudioPath = '';
     this.realtimePhraseBuffer = '';
     this.realtimePhraseLastAt = 0;
     this.subtitleContainer.innerHTML = '<div class="subtitle-line hint">点击下方按钮开始说话</div>';
     this.transcriptEditor.value = '';
     this.reportBody.innerHTML = '<p class="empty-state">完成录制或粘贴原文后，可以在这里生成表达分析报告。</p>';
+    this.minutesBody.innerHTML = '<p class="empty-state">完成录音或粘贴原文后，可以在这里生成正式会议纪要。</p>';
+    this.btnCopyMinutes.classList.add('hidden');
+    this.btnSaveMinutes.classList.add('hidden');
+    this.btnGenerateMinutes.textContent = '生成纪要';
     this.feedbackContent.innerHTML = '';
     this.resetStats();
     this.timer.textContent = '00:00';
