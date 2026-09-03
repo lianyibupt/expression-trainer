@@ -1,8 +1,6 @@
-# 智能表达训练（Expression Trainer）
+# 智能表达训练（Expression Trainer）-Elon 升级版
 
 > 面向中文表达训练与会议复盘的本地 Electron 桌面应用。它把离线语音识别、词库分析、可选 LLM 教练反馈、会议纪要和本地音频分析组合为一条可审阅的工作流。
-
-在线体验版：[exprtrain.online](https://exprtrain.online)。本仓库是本地桌面实现；在线版与本地版的功能、模型和隐私策略可能不同，应以各自界面和本文档为准。
 
 ## 目录
 
