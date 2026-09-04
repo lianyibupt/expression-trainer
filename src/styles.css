@@ -51,8 +51,8 @@ button {
 .app-shell {
   height: 100vh;
   display: grid;
-  grid-template-rows: 76px 1fr;
-  min-width: 760px;
+  grid-template-rows: 76px auto minmax(0, 1fr);
+  min-width: 0;
 }
 
 .topbar {
@@ -128,6 +128,38 @@ button {
   min-height: 0;
   display: grid;
   grid-template-columns: 188px minmax(0, 1fr);
+}
+
+.session-chrome { min-width: 0; padding: 8px 18px; border-bottom: 1px solid var(--line); background: var(--panel); -webkit-app-region: no-drag; }
+.meeting-navigation { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.meeting-tabs { display: flex; gap: 6px; overflow-x: auto; flex: 1; min-width: 0; padding: 2px 0 5px; }
+.meeting-tab { display: flex; flex-shrink: 0; align-items: center; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+.meeting-tab.selected { border-color: var(--accent); background: var(--panel-soft); }
+.meeting-tab button { background: transparent; border: 0; color: var(--muted); padding: 7px 9px; cursor: pointer; }
+.meeting-tab.selected button { color: var(--text); }
+.meeting-tab button[role="tab"] { max-width: 230px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meeting-tab small { margin-left: 8px; font-size: 11px; color: var(--good); }
+.meeting-tab .tab-close { font-size: 18px; padding: 4px 9px; }
+.meeting-tab button:focus-visible, .meeting-navigation select:focus-visible { outline: 2px solid var(--accent-2); outline-offset: -2px; }
+.meeting-tab button:disabled { opacity: .35; cursor: not-allowed; }
+.meeting-navigation select { max-width: 160px; padding: 7px; color: var(--text); background: var(--panel-soft); border: 1px solid var(--line); border-radius: 6px; }
+.meeting-context { display: flex; align-items: center; gap: 12px; padding-top: 5px; color: var(--muted); font-size: 12px; flex-wrap: wrap; }
+.meeting-context input { background: transparent; border: 0; border-bottom: 1px solid var(--line); color: var(--text); font: inherit; font-size: 14px; width: 170px; padding: 4px; }
+#meeting-save-status { overflow-wrap: anywhere; }
+.session-notice { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.recording-banner { display: flex; gap: 10px; align-items: center; margin-top: 7px; color: var(--good); font-size: 12px; }
+.recording-banner span { flex: 1; }
+@media (max-width: 650px) {
+  .session-chrome { padding: 6px 8px; }
+  .meeting-navigation { flex-wrap: wrap; }
+  .meeting-tabs { flex-basis: 100%; }
+  .workbench { grid-template-columns: 96px minmax(0, 1fr) !important; }
+  .stage-rail { padding: 8px 4px; }
+  .stage-tab { grid-template-columns: minmax(0, 1fr) !important; gap: 2px; white-space: nowrap; }
+  .stage-label { font-size: 12px; }
+  .stage-index { display: none; }
+  .stage-area { padding: 10px; }
+  .panel-heading { flex-wrap: wrap; }
 }
 
 .stage-rail {

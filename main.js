@@ -10,6 +10,7 @@ const { analyzeAudioFile, buildConversationAnalysis } = require('./lib/audio-ana
 const { runOpenSmile } = require('./lib/opensmile');
 const { MeetingActivityDetector } = require('./lib/meeting-activity-detector');
 const { pathToFileURL } = require('url');
+const { RecordingController } = require('./lib/recording-controller');
 
 app.commandLine.appendSwitch('enable-features', [
   'MacLoopbackAudioForScreenShare',
@@ -24,7 +25,7 @@ app.setName('智能表达训练');
 let mainWindow;
 let settingsWindow;
 let promptEditorWindow;
-let asrReady = false;
+const recordingController = new RecordingController({ initASR, feedAudio, stopRecognition });
 let displayMediaHandlerReady = false;
 let nativeSystemAudioProcess = null;
 const meetingActivityDetector = new MeetingActivityDetector();
@@ -243,6 +244,7 @@ function startNativeSystemAudio() {
 
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', chunk => {
+      if (nativeSystemAudioProcess !== child) return;
       stdoutBuffer += chunk;
       const lines = stdoutBuffer.split('\n');
       stdoutBuffer = lines.pop() || '';
@@ -290,11 +292,12 @@ function startNativeSystemAudio() {
     });
 
     child.on('exit', (code, signal) => {
+      const wasCurrent = nativeSystemAudioProcess === child;
       if (nativeSystemAudioProcess === child) {
         nativeSystemAudioProcess = null;
       }
       settle({ success: false, error: `Native 系统音频 helper 已退出: code=${code}, signal=${signal}` });
-      if (mainWindow) {
+      if (wasCurrent && mainWindow) {
         mainWindow.webContents.send('native-system-audio-event', { event: 'exit', code, signal });
       }
     });
@@ -497,11 +500,10 @@ ipcMain.handle('close-current-window', (event) => {
 });
 
 // 语音识别相关 - Web Audio方案
-ipcMain.handle('init-asr', async () => {
+ipcMain.handle('init-asr', async (event, sessionId) => {
   try {
     const settings = loadSettings();
-    const runtime = await initASR(settings.asr || DEFAULT_ASR_CONFIG);
-    asrReady = true;
+    const runtime = await recordingController.start(sessionId, settings.asr || DEFAULT_ASR_CONFIG);
     return { success: true, ...runtime };
   } catch (error) {
     return { success: false, error: error.message };
@@ -519,23 +521,19 @@ function normalizeAudioSamples(payload) {
 }
 
 // 接收渲染进程发来的音频数据
-ipcMain.handle('feed-audio', (event, samplesPayload) => {
-  if (!asrReady) return null;
+ipcMain.handle('feed-audio', (event, samplesPayload, sessionId) => {
   const samples = normalizeAudioSamples(samplesPayload);
-  const result = feedAudio(samples);
+  const result = recordingController.feed(sessionId, samples);
   return result; // { text, isFinal } or null
 });
 
-ipcMain.handle('stop-asr', async (event) => {
+ipcMain.handle('stop-asr', async (event, sessionId) => {
   const sender = event.sender;
-  const result = await stopRecognition({
-    onFinalResult: (payload) => {
-      if (!sender.isDestroyed()) {
-        sender.send('asr-final-result', payload);
-      }
+  const result = await recordingController.stop(sessionId, (payload) => {
+    if (!sender.isDestroyed()) {
+      sender.send('asr-final-result', payload);
     }
   });
-  asrReady = false;
   if (typeof result === 'string') {
     return { success: true, finalText: result };
   }
@@ -598,10 +596,10 @@ ipcMain.handle('analyze-text', (event, text) => {
 });
 
 // 文件保存
-ipcMain.handle('save-file', async (event, content, filename) => {
+ipcMain.handle('save-file', async (event, content, filename, options = {}) => {
   const { dialog } = require('electron');
   const result = await dialog.showSaveDialog(mainWindow, {
-    title: '保存报告',
+    title: options.title || '保存报告',
     defaultPath: path.join(app.getPath('desktop'), filename),
     filters: [{ name: 'Markdown', extensions: ['md'] }]
   });
@@ -643,7 +641,7 @@ ipcMain.handle('analyze-audio-file', async (event, { filePath }) => {
   }
 });
 
-ipcMain.handle('transcribe-audio-file', async (event, { filePath }) => {
+ipcMain.handle('transcribe-audio-file', async (event, { filePath, sessionId, jobId }) => {
   let normalized;
   try {
     normalized = await normalizeAudioFile(filePath);
@@ -651,9 +649,10 @@ ipcMain.handle('transcribe-audio-file', async (event, { filePath }) => {
     const model = settings.asr?.qwen3ModelPath || settings.asr?.finalModelPath || undefined;
     const transcription = await transcribeAudioFile(normalized.outputPath, model, {
       speakerDiarization: settings.asr?.speakerDiarization !== false,
-      onProgress: progress => event.sender.send('audio-analysis-progress', progress)
+      jobId: `${sessionId}:${jobId}`,
+      onProgress: progress => event.sender.send('audio-analysis-progress', { ...progress, sessionId, jobId })
     });
-    event.sender.send('audio-analysis-progress', { stage: 'opensmile', processedSeconds: 0, totalSeconds: 0, detail: 'openSMILE 声学特征提取中' });
+    event.sender.send('audio-analysis-progress', { sessionId, jobId, stage: 'opensmile', processedSeconds: 0, totalSeconds: 0, detail: 'openSMILE 声学特征提取中' });
     const baseAnalysis = await attachOpenSmileFeatures(
       normalized.outputPath,
       transcription?.speaker_segments || [],
@@ -668,14 +667,16 @@ ipcMain.handle('transcribe-audio-file', async (event, { filePath }) => {
   }
 });
 
-ipcMain.handle('cancel-audio-analysis', () => ({ success: cancelQwen3Transcription() }));
+ipcMain.handle('cancel-audio-analysis', (event, { sessionId, jobId } = {}) => ({ success: Boolean(sessionId && jobId) && cancelQwen3Transcription(`${sessionId}:${jobId}`) }));
 
-ipcMain.handle('save-meeting-transcript', async (event, { transcript, stats, audioPath, speakerSegments }) => {
+ipcMain.handle('save-meeting-transcript', async (event, payload) => {
+  const { transcript, stats, audioPath, speakerSegments, sessionId, title, startedAt, endedAt, transcriptRevision, transcriptSource } = payload;
   const settings = loadSettings();
   const rootDir = getMeetingOutputDir(settings);
 
   try {
     const transcriptResult = createTranscriptArtifact({
+      sessionId, title, startedAt, endedAt, transcriptRevision, transcriptSource,
       rootDir,
       transcript,
       stats,
@@ -696,18 +697,20 @@ ipcMain.handle('save-meeting-transcript', async (event, { transcript, stats, aud
     return {
       success: true,
       ...transcriptResult,
-      ...audioResult
+      ...audioResult,
+      audioUrl: pathToFileURL(audioResult.audioPath).href
     };
   } catch (error) {
     return { success: false, error: error.message };
   }
 });
 
-ipcMain.handle('save-meeting-report', async (event, { sessionDir, transcript, report, stats, createdAt }) => {
+ipcMain.handle('save-meeting-report', async (event, { sessionDir, transcript, report, stats, createdAt, sessionId, title, startedAt, endedAt, transcriptRevision, transcriptSource }) => {
   try {
     return {
       success: true,
       ...saveReportArtifact({
+        sessionId, title, startedAt, endedAt, transcriptRevision, transcriptSource,
         sessionDir,
         transcript,
         report,
@@ -721,11 +724,12 @@ ipcMain.handle('save-meeting-report', async (event, { sessionDir, transcript, re
   }
 });
 
-ipcMain.handle('save-meeting-minutes', async (event, { sessionDir, transcript, minutes, stats }) => {
+ipcMain.handle('save-meeting-minutes', async (event, { sessionDir, transcript, minutes, stats, sessionId, title, startedAt, endedAt, transcriptRevision, transcriptSource }) => {
   try {
     return {
       success: true,
       ...saveMinutesArtifact({
+        sessionId, title, startedAt, endedAt, transcriptRevision, transcriptSource,
         sessionDir,
         transcript,
         minutes,

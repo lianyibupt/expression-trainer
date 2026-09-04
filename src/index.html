@@ -7,6 +7,9 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <div id="session-hosts"></div>
+  <template id="session-template">
+  <link rel="stylesheet" href="styles.css">
   <div class="app-shell">
     <header class="topbar">
       <div class="brand-block">
@@ -19,6 +22,25 @@
         <button id="btn-settings" class="icon-button" title="设置" aria-label="设置">⚙️</button>
       </div>
     </header>
+
+    <div class="session-chrome">
+      <nav class="meeting-navigation" aria-label="会议导航">
+        <div id="meeting-tabs" class="meeting-tabs" role="tablist" aria-label="已打开的会议"></div>
+        <button id="btn-new-session" class="btn-sm">＋ 新会议</button>
+        <select id="recent-sessions" aria-label="重新打开已关闭的会议"><option value="">最近关闭</option></select>
+      </nav>
+      <div class="meeting-context">
+        <input id="meeting-title" maxlength="80" aria-label="会议名称" title="修改会议名称">
+        <span id="meeting-identity"></span>
+        <span id="meeting-save-status">未保存</span>
+      </div>
+      <p id="session-notice" class="session-notice" role="status">关闭标签不删除内容；未保存内容仅保留到本次应用退出。</p>
+      <div id="recording-banner" class="recording-banner hidden" aria-live="polite">
+        <span id="recording-banner-text"></span>
+        <button id="btn-view-recording" class="btn-sm">返回录音</button>
+        <button id="btn-stop-recording" class="btn-sm">结束当前录音</button>
+      </div>
+    </div>
 
     <div class="workbench">
       <aside class="stage-rail" aria-label="功能阶段">
@@ -101,6 +123,7 @@
               <button id="btn-copy-text" class="btn-sm hidden">复制</button>
               <button id="btn-save-text" class="btn-sm hidden">保存</button>
               <button id="btn-clear" class="btn-sm hidden">清空</button>
+              <button id="btn-adopt-final" class="btn-sm hidden">采用最终稿（替换编辑稿）</button>
             </div>
           </div>
 
@@ -247,6 +270,9 @@
     <button id="btn-close-report" type="button"></button>
   </div>
 
+  </template>
+  <script src="meeting-sessions.js"></script>
   <script src="app.js"></script>
+  <script src="workspace.js"></script>
 </body>
 </html>

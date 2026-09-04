@@ -6,6 +6,27 @@ const test = require('node:test');
 
 const { createMeetingArtifacts, createTranscriptArtifact, saveMinutesArtifact, saveReportArtifact, saveAudioArtifact } = require('../lib/meeting-session');
 
+test('meeting saves reuse only their own folder and include recording identity', t => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'expression-identity-'));
+  t.after(() => fs.rmSync(rootDir, { recursive: true, force: true }));
+  const identity = { sessionId: 'meeting-a', title: 'Planning', startedAt: '2026-09-03T01:00:00Z', endedAt: '2026-09-03T02:00:00Z', transcriptRevision: 3, transcriptSource: 'edited' };
+  const a = createTranscriptArtifact({ ...identity, rootDir, transcript: 'A', now: new Date('2026-09-04T03:00:00Z') });
+  const b = createTranscriptArtifact({ ...identity, sessionId: 'meeting-b', rootDir, transcript: 'B' });
+  assert.notEqual(a.sessionDir, b.sessionDir);
+  const updated = createTranscriptArtifact({ ...identity, rootDir, transcript: 'updated A' });
+  assert.equal(updated.sessionDir, a.sessionDir);
+  assert.match(fs.readFileSync(a.transcriptPath, 'utf8'), /meeting-a/);
+  assert.match(fs.readFileSync(a.transcriptPath, 'utf8'), /Planning/);
+  assert.match(fs.readFileSync(b.transcriptPath, 'utf8'), /\nB\n/);
+  const metadata = JSON.parse(fs.readFileSync(a.metadataPath, 'utf8'));
+  assert.equal(metadata.startedAt, identity.startedAt);
+  assert.equal(metadata.transcriptRevision, 3);
+  assert.throws(() => saveReportArtifact({ ...identity, sessionId: 'meeting-b', sessionDir: a.sessionDir, report: 'wrong report' }), /ownership mismatch/);
+  assert.equal(fs.existsSync(path.join(a.sessionDir, 'report.md')), false);
+  assert.throws(() => saveMinutesArtifact({ ...identity, sessionId: 'meeting-b', sessionDir: a.sessionDir, minutes: 'wrong minutes' }), /ownership mismatch/);
+  assert.equal(fs.existsSync(path.join(a.sessionDir, 'minutes.md')), false);
+});
+
 test('createMeetingArtifacts saves transcript, report, and metadata in a session folder', () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'expression-session-'));
   const now = new Date(2026, 7, 3, 9, 10, 11);
