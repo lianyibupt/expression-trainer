@@ -350,13 +350,19 @@ def main():
 
     dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
 
-    model = Qwen3ASRModel.from_pretrained(
-        args.model,
-        dtype=dtype,
-        device_map=args.device_map,
-        max_inference_batch_size=args.batch_size,
-        max_new_tokens=args.max_new_tokens,
-    )
+    try:
+        model = Qwen3ASRModel.from_pretrained(
+            args.model,
+            dtype=dtype,
+            device_map=args.device_map,
+            max_inference_batch_size=args.batch_size,
+            max_new_tokens=args.max_new_tokens,
+        )
+    except Exception as exc:
+        offline = os.environ.get("HF_HUB_OFFLINE") == "1" or os.environ.get("TRANSFORMERS_OFFLINE") == "1"
+        hint = "请先下载完整模型，或在设置中选择本地模型目录。" if offline else "请检查模型目录或网络连接。"
+        print(f"Qwen3-ASR 模型加载失败：{exc}\n{hint}", file=sys.stderr)
+        return 2
 
     samples = read_wav(args.audio)
     if args.speaker_diarization:

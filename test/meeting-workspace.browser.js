@@ -131,14 +131,45 @@ const { chromium } = require('playwright');
     assert.equal(await current().locator('#btn-adopt-final').isVisible(), true);
     await current().locator('#btn-adopt-final').click();
     assert.equal(await current().locator('#transcript-editor').inputValue(), '第三场最终稿');
+
+    await current().locator('#btn-new-session').click();
+    const d = await page.evaluate(() => window.meetingWorkspace.sessions.activeId);
+    await current().locator('#meeting-title').fill('连续会议待回写');
+    await current().locator('#meeting-title').press('Tab');
+    await current().locator('#btn-start').click();
+    await page.evaluate(id => window.meetingWorkspace.sessions.get(id).trainer.handleASRResult({ text: '待保存的实时稿。', isFinal: true }), d);
+    await current().locator('#btn-stop').click();
+    await page.evaluate(id => { window.meetingWorkspace.sessions.get(id).trainer.confirmSaveTranscript(); }, d);
+    await page.waitForFunction(id => window.testState.saves.some(item => item.sessionId === id), d);
+    await page.evaluate(id => window.testState.pendingSaves[id]({ success: true, sessionDir: `/saved/${id}`, transcriptPath: `/saved/${id}/transcript.md` }), d);
+    await page.waitForFunction(id => window.meetingWorkspace.sessions.get(id).trainer.savedSnapshot?.transcriptSource === 'realtime', d);
+    await current().locator('#btn-new-session').click();
+    const e = await page.evaluate(() => window.meetingWorkspace.sessions.activeId);
+    await current().locator('#btn-start').click();
+    await page.evaluate(id => {
+      window.testState.finals.forEach(cb => cb({ sessionId: id, finalText: '分离后的最终稿。', speakerCount: 2,
+        speakerSegments: [{ speaker: '说话人 1', start: 0, end: 1, text: '分离后的最终稿。' }] }));
+    }, d);
+    await page.waitForFunction(id => window.testState.saves.filter(item => item.sessionId === id).length === 2, d);
+    const refreshed = await page.evaluate(id => window.testState.saves.filter(item => item.sessionId === id)[1], d);
+    assert.equal(refreshed.transcriptSource, 'final');
+    assert.equal(refreshed.transcript, '分离后的最终稿。');
+    assert.equal(refreshed.speakerSegments[0].speaker, '说话人 1');
+    assert.equal(refreshed.sessionId, d);
+    assert.equal(await page.evaluate(id => window.testState.saves.some(item => item.sessionId === id), e), false);
+    await page.evaluate(id => window.testState.pendingSaves[id]({ success: true, sessionDir: `/saved/${id}`, transcriptPath: `/saved/${id}/transcript.md` }), d);
+    await current().locator('#btn-stop').click();
+    await page.waitForFunction(() => !window.meetingWorkspace.sessions.recordingId);
+
     await current().getByRole('tab', { name: /产品评审/ }).click();
     await current().getByRole('button', { name: '关闭 产品评审', exact: true }).click();
     await current().getByRole('button', { name: '关闭 技术讨论', exact: true }).click();
     await current().getByRole('button', { name: '关闭 会议 3', exact: true }).click();
+    await current().getByRole('button', { name: '关闭 连续会议待回写', exact: true }).click();
     assert.equal(await page.evaluate(() => [...window.meetingWorkspace.sessions.items.values()].filter(s => s.open).length), 1);
     assert.equal(await current().locator('#transcript-editor').inputValue(), '');
     assert.deepEqual(errors, []);
-    console.log('Browser checks passed: recording ownership, close/reopen, out-of-order finalization, edited export, pending save/report, desktop/mobile, new recording preserves old meeting, edit/final conflict, close last tab.');
+    console.log('Browser checks passed: recording ownership, close/reopen, out-of-order finalization, edited export, pending save/report, final transcript artifact refresh, desktop/mobile, new recording preserves old meeting, edit/final conflict, close last tab.');
   } finally {
     await browser.close();
   }

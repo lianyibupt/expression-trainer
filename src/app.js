@@ -10,6 +10,7 @@ class ExpressionTrainer {
     this.transcriptSource = 'realtime';
     this.editorModified = false;
     this.savePromise = null;
+    this.finalArtifactRefreshPromise = null;
     this.finalCandidate = null;
     this.isStartingRecording = false;
     this.pendingAudioFeeds = new Set();
@@ -188,6 +189,7 @@ class ExpressionTrainer {
       this.transcriptSource = 'final';
       await this.loadTranscriptText(result.finalText, { duration: this.stats.duration, requestFeedback: false });
       this.root.getElementById('btn-adopt-final').classList.add('hidden');
+      await this.refreshSavedArtifactFromFinal(this.activeSessionGeneration);
     });
   }
 
@@ -514,6 +516,7 @@ class ExpressionTrainer {
         this.btnCopyText.classList.remove('hidden');
         this.btnSaveText.classList.remove('hidden');
         this.btnClear.classList.remove('hidden');
+        await this.refreshSavedArtifactFromFinal(sessionGeneration);
       } else {
         this.awaitingFinalTranscript = false;
         this.setSessionStatus('最终稿为空，已保留实时稿');
@@ -1486,6 +1489,30 @@ class ExpressionTrainer {
     return result;
   }
 
+  async refreshSavedArtifactFromFinal(sessionGeneration) {
+    if (this.finalArtifactRefreshPromise) return this.finalArtifactRefreshPromise;
+
+    const refresh = (async () => {
+      if (this.savePromise) await this.savePromise;
+      if (!this.isSessionCurrent(sessionGeneration) || this.editorModified || this.transcriptSource !== 'final') return null;
+      if (this.savedSnapshot?.transcriptSource !== 'realtime' || !this.meetingSession?.sessionDir) return null;
+
+      const snapshot = createSaveSnapshot(this.session, this);
+      const result = await this.saveMeetingTranscriptArtifact(snapshot);
+      if (result?.success && this.isSessionCurrent(sessionGeneration)) {
+        this.addFeedbackItem('最终稿及说话人分离结果已更新到原会议记录', 'good');
+      }
+      return result;
+    })();
+
+    this.finalArtifactRefreshPromise = refresh;
+    try {
+      return await refresh;
+    } finally {
+      if (this.finalArtifactRefreshPromise === refresh) this.finalArtifactRefreshPromise = null;
+    }
+  }
+
   async saveMeetingReportArtifact(report, snapshot, sessionDir) {
     if (!sessionDir) return;
     const result = await this.api.saveMeetingReport({ ...snapshot, sessionDir, report });
@@ -1580,6 +1607,8 @@ class ExpressionTrainer {
     this.lastReport = '';
     this.lastMinutes = '';
     this.meetingSession = null;
+    this.savedSnapshot = null;
+    this.savedPath = '';
     this.pendingAudioPath = '';
     this.speakerSegments = [];
     this.realtimePhraseBuffer = '';
