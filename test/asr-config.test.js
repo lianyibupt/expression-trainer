@@ -56,3 +56,22 @@ test('buildASRConfig supports a custom SenseVoice directory for compatible expor
   assert.equal(config.recognizerConfig.modelConfig.senseVoice.model, path.join(modelDir, 'model.onnx'));
   assert.equal(config.recognizerConfig.modelConfig.tokens, path.join(modelDir, 'tokens.json'));
 });
+
+test('buildASRConfig defaults Qwen3-ASR language to auto recognition', () => {
+  const config = buildASRConfig({ modelPreset: 'paraformer-qwen3-final' });
+  assert.equal(config.qwen3Language, 'auto');
+});
+
+test('buildASRConfig passes an explicit Qwen3-ASR language through', () => {
+  const config = buildASRConfig({ modelPreset: 'qwen3-asr-python', qwen3Language: 'Chinese' });
+  assert.equal(config.qwen3Language, 'Chinese');
+});
+
+test('normalizeQwen3Language maps auto and blank values to the none sentinel', () => {
+  const { normalizeQwen3Language } = require('../lib/asr');
+  assert.equal(normalizeQwen3Language('auto'), 'none');
+  assert.equal(normalizeQwen3Language(undefined), 'none');
+  assert.equal(normalizeQwen3Language(''), 'none');
+  assert.equal(normalizeQwen3Language('Chinese'), 'Chinese');
+  assert.equal(normalizeQwen3Language('Chinese,English'), 'Chinese,English');
+});

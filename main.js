@@ -649,6 +649,7 @@ ipcMain.handle('transcribe-audio-file', async (event, { filePath, sessionId, job
     const model = settings.asr?.qwen3ModelPath || settings.asr?.finalModelPath || undefined;
     const transcription = await transcribeAudioFile(normalized.outputPath, model, {
       speakerDiarization: settings.asr?.speakerDiarization !== false,
+      language: settings.asr?.qwen3Language || 'auto',
       jobId: `${sessionId}:${jobId}`,
       onProgress: progress => event.sender.send('audio-analysis-progress', { ...progress, sessionId, jobId })
     });
