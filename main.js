@@ -89,7 +89,8 @@ const DEFAULT_ASR_CONFIG = {
   qwen3ModelPath: '',
   speakerDiarization: true,
   language: 'zh',
-  qwen3Language: 'auto'
+  qwen3Language: 'auto',
+  autoSegment: true
 };
 
 const DEFAULT_MEETING_CONFIG = {

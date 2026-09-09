@@ -65,6 +65,7 @@ class SettingsPage {
     this.qwen3ModelPathInput = document.getElementById('qwen3-model-path');
     this.qwen3LanguageSelect = document.getElementById('qwen3-language');
     this.speakerDiarizationInput = document.getElementById('speaker-diarization');
+    this.autoSegmentInput = document.getElementById('auto-segment');
     this.meetingOutputDirInput = document.getElementById('meeting-output-dir');
     this.autoStartRecordingInput = document.getElementById('auto-start-recording');
     this.launchAtLoginInput = document.getElementById('launch-at-login');
@@ -134,6 +135,7 @@ class SettingsPage {
     this.qwen3ModelPathInput.value = asr.qwen3ModelPath || '';
     this.qwen3LanguageSelect.value = asr.qwen3Language || 'auto';
     this.speakerDiarizationInput.checked = asr.speakerDiarization !== false;
+    this.autoSegmentInput.checked = asr.autoSegment !== false;
     this.meetingOutputDirInput.value = meeting.outputDir || '';
     this.autoStartRecordingInput.checked = Boolean(meeting.autoStartRecording);
     this.launchAtLoginInput.checked = Boolean(meeting.launchAtLogin);
@@ -296,6 +298,7 @@ class SettingsPage {
       qwen3ModelPath: this.qwen3ModelPathInput.value.trim(),
       speakerDiarization: this.speakerDiarizationInput.checked,
       qwen3Language: this.qwen3LanguageSelect.value,
+      autoSegment: this.autoSegmentInput.checked,
       language: 'zh'
     };
 

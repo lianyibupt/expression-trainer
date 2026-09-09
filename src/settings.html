@@ -322,6 +322,12 @@
       </label>
       <div class="hint" style="margin:-5px 0 14px 28px;">录音结束后在本机对语音片段聚类，并为最终原文添加“说话人 1/2”标签；不会影响实时字幕。</div>
 
+      <label class="checkbox-row">
+        <input type="checkbox" id="auto-segment" checked>
+        识别结果自动断句补标点
+      </label>
+      <div class="hint" style="margin:-5px 0 14px 28px;">对实时字幕、最终稿与导入转写自动补句末标点并按句分行；只作用于识别结果，不会改写你粘贴或手动编辑的内容。</div>
+
       <div class="form-group">
         <label>会议文件保存目录</label>
         <input type="text" id="meeting-output-dir" placeholder="留空则保存到 Documents/Expression Trainer Meetings">

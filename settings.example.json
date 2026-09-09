@@ -24,6 +24,7 @@
     "engine": "sensevoice",
     "modelPath": "",
     "qwen3Language": "auto",
+    "autoSegment": true,
     "language": "zh"
   },
   "meeting": {
