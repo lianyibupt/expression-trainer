@@ -74,6 +74,7 @@ class ExpressionTrainer {
     this.btnClosePaste = this.root.getElementById('btn-close-paste');
     this.btnAnalyzePaste = this.root.getElementById('btn-analyze-paste');
     this.btnPolishTranscript = this.root.getElementById('btn-polish-transcript');
+    this.btnPunctuateTranscript = this.root.getElementById('btn-punctuate-transcript');
     this.btnGoMinutes = this.root.getElementById('btn-go-minutes');
     this.btnCopyText = this.root.getElementById('btn-copy-text');
     this.btnSaveText = this.root.getElementById('btn-save-text');
@@ -179,6 +180,7 @@ class ExpressionTrainer {
     this.btnClosePaste.addEventListener('click', () => this.pasteModal.classList.add('hidden'));
     this.btnAnalyzePaste.addEventListener('click', () => this.analyzePastedText());
     this.btnPolishTranscript.addEventListener('click', () => this.polishTranscript());
+    this.btnPunctuateTranscript.addEventListener('click', () => this.punctuateTranscript());
     this.btnGoMinutes.addEventListener('click', () => this.goToMinutes());
     this.btnCopyText.addEventListener('click', () => this.copyOriginalText());
     this.btnSaveText.addEventListener('click', () => this.saveOriginalText());
@@ -1743,6 +1745,46 @@ class ExpressionTrainer {
     } finally {
       this.btnPolishTranscript.disabled = false;
       this.btnPolishTranscript.textContent = label;
+    }
+  }
+
+  async punctuateTranscript() {
+    const generation = this.activeSessionGeneration;
+    const punctuateRevision = this.transcriptRevision;
+    const text = (this.transcriptEditor.value || this.fullText || '').trim();
+    if (!text) {
+      this.workspace.notice('请先录制或粘贴会议原文，再执行补标点/断句。');
+      this.transcriptEditor.focus();
+      return;
+    }
+    this.btnPunctuateTranscript.disabled = true;
+    const label = this.btnPunctuateTranscript.textContent;
+    this.btnPunctuateTranscript.textContent = '处理中…';
+    try {
+      const result = await this.api.punctuateTranscript({ fullText: text });
+      if (!this.isSessionCurrent(generation)) return;
+      if (!result.success || !result.text) throw new Error(result.error || '补标点/断句失败');
+      const polished = result.text.trim();
+      if (this.transcriptRevision !== punctuateRevision) {
+        this.workspace.notice('等待期间原文已变化，已放弃本次结果，请再次点击。');
+        return;
+      }
+      if (polished === text) {
+        this.workspace.notice('原文已具备完整句末标点，无需调整。');
+        return;
+      }
+      this.transcriptEditor.value = polished;
+      this.handleTranscriptEditorInput();
+      this.workspace.notice('补标点/断句完成，请审阅后点“保存”入库。');
+      this.setSessionStatus('已修正，待审阅');
+    } catch (error) {
+      if (this.isSessionCurrent(generation)) {
+        this.workspace.notice(`补标点/断句失败：${error.message}`);
+        this.setSessionStatus('补标点/断句失败');
+      }
+    } finally {
+      this.btnPunctuateTranscript.disabled = false;
+      this.btnPunctuateTranscript.textContent = label;
     }
   }
 }
