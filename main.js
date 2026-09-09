@@ -11,6 +11,7 @@ const { runOpenSmile } = require('./lib/opensmile');
 const { MeetingActivityDetector } = require('./lib/meeting-activity-detector');
 const { pathToFileURL } = require('url');
 const { RecordingController } = require('./lib/recording-controller');
+const { segmentTranscript } = require('./lib/sentence-segment');
 
 app.commandLine.appendSwitch('enable-features', [
   'MacLoopbackAudioForScreenShare',
@@ -180,6 +181,16 @@ function applyLoginItemSettings(settings) {
 function getCurrentProviderSettings(settings) {
   const config = settings.providers[settings.provider];
   return config || DEFAULT_PROVIDER_CONFIGS[settings.provider] || {};
+}
+
+function autoSegmentEnabled() {
+  return loadSettings()?.asr?.autoSegment !== false;
+}
+
+function applyAutoSegmentText(text) {
+  const value = String(text || '').trim();
+  if (!value) return value;
+  return autoSegmentEnabled() ? segmentTranscript(value) : value;
 }
 
 function getMeetingOutputDir(settings) {
@@ -532,13 +543,15 @@ ipcMain.handle('feed-audio', (event, samplesPayload, sessionId) => {
 ipcMain.handle('stop-asr', async (event, sessionId) => {
   const sender = event.sender;
   const result = await recordingController.stop(sessionId, (payload) => {
+    if (payload?.finalText) payload.finalText = applyAutoSegmentText(payload.finalText);
     if (!sender.isDestroyed()) {
       sender.send('asr-final-result', payload);
     }
   });
   if (typeof result === 'string') {
-    return { success: true, finalText: result };
+    return { success: true, finalText: applyAutoSegmentText(result) };
   }
+  if (result?.finalText) result.finalText = applyAutoSegmentText(result.finalText);
   return { success: true, ...result };
 });
 
@@ -793,3 +806,5 @@ ipcMain.handle('polish-transcript', async (event, { fullText }) => {
     return { success: false, error: error.message };
   }
 });
+
+ipcMain.handle('segment-text', (event, { text }) => ({ success: true, text: applyAutoSegmentText(text) }));

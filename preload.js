@@ -55,6 +55,7 @@ contextBridge.exposeInMainWorld('api', {
   getFinalReport: (data) => ipcRenderer.invoke('get-final-report', data),
   getMeetingMinutes: (data) => ipcRenderer.invoke('get-meeting-minutes', data),
   polishTranscript: (payload) => ipcRenderer.invoke('polish-transcript', payload),
+  segmentText: (text) => ipcRenderer.invoke('segment-text', { text }),
   testLLMConnection: (settings) => ipcRenderer.invoke('test-llm-connection', settings),
 
   // 文件保存
