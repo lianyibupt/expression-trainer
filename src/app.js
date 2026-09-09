@@ -72,6 +72,7 @@ class ExpressionTrainer {
     this.btnReviewReport = this.root.getElementById('btn-review-report');
     this.btnClosePaste = this.root.getElementById('btn-close-paste');
     this.btnAnalyzePaste = this.root.getElementById('btn-analyze-paste');
+    this.btnPolishTranscript = this.root.getElementById('btn-polish-transcript');
     this.btnGoMinutes = this.root.getElementById('btn-go-minutes');
     this.btnCopyText = this.root.getElementById('btn-copy-text');
     this.btnSaveText = this.root.getElementById('btn-save-text');
@@ -176,6 +177,7 @@ class ExpressionTrainer {
     this.audioWaveform.addEventListener('click', event => this.seekAudio(event));
     this.btnClosePaste.addEventListener('click', () => this.pasteModal.classList.add('hidden'));
     this.btnAnalyzePaste.addEventListener('click', () => this.analyzePastedText());
+    this.btnPolishTranscript.addEventListener('click', () => this.polishTranscript());
     this.btnGoMinutes.addEventListener('click', () => this.goToMinutes());
     this.btnCopyText.addEventListener('click', () => this.copyOriginalText());
     this.btnSaveText.addEventListener('click', () => this.saveOriginalText());
@@ -1658,5 +1660,36 @@ class ExpressionTrainer {
     // 请求AI语境化反馈
     this.requestRealtimeFeedback();
     this.switchStage('optimize');
+  }
+
+  async polishTranscript() {
+    const generation = this.activeSessionGeneration;
+    const text = (this.transcriptEditor.value || this.fullText || '').trim();
+    if (!text) {
+      this.workspace.notice('请先录制或粘贴会议原文，再执行错字修正。');
+      this.transcriptEditor.focus();
+      return;
+    }
+    this.btnPolishTranscript.disabled = true;
+    const label = this.btnPolishTranscript.textContent;
+    this.btnPolishTranscript.textContent = '修正中…';
+    try {
+      const result = await this.api.polishTranscript({ fullText: text });
+      if (!result.success || !result.text) throw new Error(result.error || '错字修正失败');
+      if (!this.isSessionCurrent(generation)) return;
+      this.transcriptEditor.value = result.text;
+      this.handleTranscriptEditorInput();
+      this.workspace.notice('错字修正完成，请审阅后点“保存”入库。');
+      this.setSessionStatus('已修正，待审阅');
+    } catch (error) {
+      if (this.isSessionCurrent(generation)) {
+        this.workspace.notice(`错字修正失败：${error.message}`);
+      }
+    } finally {
+      if (this.isSessionCurrent(generation)) {
+        this.btnPolishTranscript.disabled = false;
+        this.btnPolishTranscript.textContent = label;
+      }
+    }
   }
 }
