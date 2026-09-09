@@ -4,7 +4,7 @@ const fs = require('fs');
 const { spawn } = require('child_process');
 const { initASR, feedAudio, stopRecognition, transcribeAudioFile, cancelQwen3Transcription } = require('./lib/asr');
 const { loadLexicon, analyzeText } = require('./lib/lexicon');
-const { sendFeedback, sendReport, sendMeetingMinutes, sendTranscriptPolish, testConnection } = require('./lib/ai-feedback');
+const { sendFeedback, sendReport, sendMeetingMinutes, sendTranscriptPolish, sendTranscriptPunctuate, testConnection } = require('./lib/ai-feedback');
 const { createTranscriptArtifact, saveMinutesArtifact, saveReportArtifact, saveAudioArtifact } = require('./lib/meeting-session');
 const { analyzeAudioFile, buildConversationAnalysis } = require('./lib/audio-analysis');
 const { runOpenSmile } = require('./lib/opensmile');
@@ -801,6 +801,18 @@ ipcMain.handle('polish-transcript', async (event, { fullText }) => {
   const customPrompt = loadCustomPrompt();
   try {
     const text = await sendTranscriptPolish(fullText, { ...settings, ...providerConfig }, customPrompt);
+    return { success: true, text };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('punctuate-transcript', async (event, { fullText }) => {
+  const settings = loadSettings();
+  const providerConfig = getCurrentProviderSettings(settings);
+  const customPrompt = loadCustomPrompt();
+  try {
+    const text = await sendTranscriptPunctuate(fullText, { ...settings, ...providerConfig }, customPrompt);
     return { success: true, text };
   } catch (error) {
     return { success: false, error: error.message };
