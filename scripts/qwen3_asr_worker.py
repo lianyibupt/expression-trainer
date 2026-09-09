@@ -44,6 +44,29 @@ def emit_progress(stage, processed_seconds, total_seconds, detail=""):
 SAMPLE_RATE = 16000
 
 
+def normalize_language(value):
+    """Map worker language hints to qwen_asr accepted values.
+
+    None -> auto detection (recommended for mixed zh/en speech).
+    Single token -> that language string.
+    Comma separated -> list of languages (requires a qwen-asr release that
+    supports per-utterance language lists).
+    """
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if raw.lower() in {"", "none", "null", "auto"}:
+        return None
+    known = {"chinese": "Chinese", "english": "English"}
+    tokens = [tok.strip() for tok in raw.split(",") if tok.strip()]
+    if not tokens:
+        return None
+    if len(tokens) == 1:
+        token = tokens[0]
+        return known.get(token.lower(), token)
+    return [known.get(tok.lower(), tok) for tok in tokens]
+
+
 def read_wav(path):
     import wave
 
@@ -247,10 +270,19 @@ def transcribe_audio_chunks(model, chunks, language, chunk_seconds, total_second
         nonlocal current, current_seconds, processed_seconds
         if not current:
             return
-        results = model.transcribe(
-            audio=[(chunk, SAMPLE_RATE) for chunk in current],
-            language=language,
-        )
+        try:
+            results = model.transcribe(
+                audio=[(chunk, SAMPLE_RATE) for chunk in current],
+                language=language,
+            )
+        except TypeError:
+            if not isinstance(language, list):
+                raise
+            # 旧版 qwen-asr 不支持按语言列表混说：降级为自动语种识别
+            results = model.transcribe(
+                audio=[(chunk, SAMPLE_RATE) for chunk in current],
+                language=None,
+            )
         texts.extend(str(getattr(result, "text", "") or "").strip() for result in results)
         processed_seconds += current_seconds
         emit_progress("transcribing", processed_seconds, total_seconds, "转写音频片段中")
@@ -344,9 +376,7 @@ def main():
         print("--audio is required unless --check is used", file=sys.stderr)
         return 2
 
-    language = args.language
-    if language.lower() in {"", "none", "null", "auto"}:
-        language = None
+    language = normalize_language(args.language)
 
     dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
 
