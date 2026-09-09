@@ -284,6 +284,7 @@ models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17-int8/
 | QWEN3_ASR_DEVICE_MAP | auto | 传给 Qwen3-ASR 的设备映射 |
 | QWEN3_ASR_MAX_NEW_TOKENS | 4096 | 单次生成最大 token 数 |
 | QWEN3_ASR_BATCH_SIZE | 1 | 推理批量参数 |
+| QWEN3_ASR_LANGUAGE | auto | `auto`（默认，自动语种识别）/ `Chinese` / `English`，或逗号分隔如 `Chinese,English`；设置页「Qwen3 转写语言」优先于该环境变量 |
 | OPENSMILE_PYTHON | 自动发现 | 指定 openSMILE Python worker |
 
 先用短音频验证设备映射、批次和切片，再用于正式会议；这些参数可能影响内存、显存和延迟。

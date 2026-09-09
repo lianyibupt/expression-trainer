@@ -21,7 +21,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Qwen3-ASR transcription worker")
     parser.add_argument("--model", required=True, help="Local model path or HuggingFace model id")
     parser.add_argument("--audio", help="Local wav file path")
-    parser.add_argument("--language", default="Chinese", help="Language hint, or auto/none")
+    parser.add_argument("--language", default="auto", help="Language hint, or auto/none")
     parser.add_argument("--device-map", default=os.environ.get("QWEN3_ASR_DEVICE_MAP", "auto"))
     parser.add_argument("--max-new-tokens", type=int, default=int(os.environ.get("QWEN3_ASR_MAX_NEW_TOKENS", "4096")))
     parser.add_argument("--batch-size", type=int, default=int(os.environ.get("QWEN3_ASR_BATCH_SIZE", "1")))
