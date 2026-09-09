@@ -9,6 +9,7 @@ const app = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8')
 test('transcript stage offers an AI polish button', () => {
   assert.match(html, /id="btn-polish-transcript"/);
   assert.match(html, />AI 修正错字</);
+  assert.match(html, /id="btn-polish-transcript"[^>]*title=/);
   assert.match(app, /btnPolishTranscript = this\.root\.getElementById\('btn-polish-transcript'\)/);
 });
 
@@ -16,4 +17,11 @@ test('polish result is written back into the editor as an edited draft', () => {
   assert.match(app, /polishTranscript\(\)/);
   assert.match(app, /this\.api\.polishTranscript\(\{ fullText: text \}\)/);
   assert.match(app, /this\.handleTranscriptEditorInput\(\)/);
+});
+
+test('polish method guards edits during the request and short-circuits no-ops', () => {
+  assert.match(app, /const polishRevision = this\.transcriptRevision;/);
+  assert.match(app, /this\.transcriptRevision !== polishRevision/);
+  assert.match(app, /polished === text/);
+  assert.match(app, /未发现需要修正的错字。/);
 });

@@ -1664,6 +1664,7 @@ class ExpressionTrainer {
 
   async polishTranscript() {
     const generation = this.activeSessionGeneration;
+    const polishRevision = this.transcriptRevision;
     const text = (this.transcriptEditor.value || this.fullText || '').trim();
     if (!text) {
       this.workspace.notice('请先录制或粘贴会议原文，再执行错字修正。');
@@ -1675,21 +1676,29 @@ class ExpressionTrainer {
     this.btnPolishTranscript.textContent = '修正中…';
     try {
       const result = await this.api.polishTranscript({ fullText: text });
-      if (!result.success || !result.text) throw new Error(result.error || '错字修正失败');
       if (!this.isSessionCurrent(generation)) return;
-      this.transcriptEditor.value = result.text;
+      if (!result.success || !result.text) throw new Error(result.error || '错字修正失败');
+      const polished = result.text.trim();
+      if (this.transcriptRevision !== polishRevision) {
+        this.workspace.notice('等待期间原文已变化，已放弃本次修正结果，请再次点击。');
+        return;
+      }
+      if (polished === text) {
+        this.workspace.notice('未发现需要修正的错字。');
+        return;
+      }
+      this.transcriptEditor.value = polished;
       this.handleTranscriptEditorInput();
       this.workspace.notice('错字修正完成，请审阅后点“保存”入库。');
       this.setSessionStatus('已修正，待审阅');
     } catch (error) {
       if (this.isSessionCurrent(generation)) {
         this.workspace.notice(`错字修正失败：${error.message}`);
+        this.setSessionStatus('错字修正失败');
       }
     } finally {
-      if (this.isSessionCurrent(generation)) {
-        this.btnPolishTranscript.disabled = false;
-        this.btnPolishTranscript.textContent = label;
-      }
+      this.btnPolishTranscript.disabled = false;
+      this.btnPolishTranscript.textContent = label;
     }
   }
 }
