@@ -4,7 +4,7 @@ const fs = require('fs');
 const { spawn } = require('child_process');
 const { initASR, feedAudio, stopRecognition, transcribeAudioFile, cancelQwen3Transcription } = require('./lib/asr');
 const { loadLexicon, analyzeText } = require('./lib/lexicon');
-const { sendFeedback, sendReport, sendMeetingMinutes, testConnection } = require('./lib/ai-feedback');
+const { sendFeedback, sendReport, sendMeetingMinutes, sendTranscriptPolish, testConnection } = require('./lib/ai-feedback');
 const { createTranscriptArtifact, saveMinutesArtifact, saveReportArtifact, saveAudioArtifact } = require('./lib/meeting-session');
 const { analyzeAudioFile, buildConversationAnalysis } = require('./lib/audio-analysis');
 const { runOpenSmile } = require('./lib/opensmile');
@@ -775,6 +775,18 @@ ipcMain.handle('get-meeting-minutes', async (event, { fullText, stats }) => {
   try {
     const minutes = await sendMeetingMinutes(fullText, stats, { ...settings, ...providerConfig }, customPrompt);
     return { success: true, minutes };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('polish-transcript', async (event, { fullText }) => {
+  const settings = loadSettings();
+  const providerConfig = getCurrentProviderSettings(settings);
+  const customPrompt = loadCustomPrompt();
+  try {
+    const text = await sendTranscriptPolish(fullText, { ...settings, ...providerConfig }, customPrompt);
+    return { success: true, text };
   } catch (error) {
     return { success: false, error: error.message };
   }
