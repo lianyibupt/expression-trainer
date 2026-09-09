@@ -46,6 +46,7 @@ class ExpressionTrainer {
     this.pendingFinalTranscriptGeneration = 0;
     this.realtimePhraseBuffer = '';
     this.realtimePhraseLastAt = 0;
+    this.realtimeFlushChain = null;
     this.currentStage = 'live';
 
     this.initElements();
@@ -343,9 +344,14 @@ class ExpressionTrainer {
         const transcription = transcriptionResult.transcription;
         let displayText = transcription?.text || '';
         if (transcription && this.autoSegmentEnabled()) {
-          const segmented = await this.api.segmentText(transcription?.text || '');
-          if (segmented?.success && segmented.text) displayText = segmented.text;
+          try {
+            const segmented = await this.api.segmentText(transcription?.text || '');
+            if (segmented?.success && segmented.text) displayText = segmented.text;
+          } catch (_) {
+            // 断句失败：保留原文展示
+          }
         }
+        if (this.audioAnalysisCancelled) return;
         this.renderAudioAnalysis(transcriptionResult.audioAnalysis, transcription ? { ...transcription, text: displayText } : null);
       }
       this.setSessionStatus('音频分析完成');
@@ -1125,32 +1131,50 @@ class ExpressionTrainer {
   }
 
   async flushRealtimePhraseBuffer() {
+    const previous = this.realtimeFlushChain;
     const text = this.realtimePhraseBuffer.trim();
-    if (!text) return;
-
     this.realtimePhraseBuffer = '';
     this.realtimePhraseLastAt = 0;
 
-    let sentences = [text];
-    if (this.autoSegmentEnabled()) {
-      const segmented = await this.api.segmentText(text);
-      if (segmented?.success && segmented.text) {
-        sentences = segmented.text.split('\n').map(s => s.trim()).filter(Boolean);
+    const task = (async () => {
+      if (previous) {
+        try { await previous; } catch (_) { /* 前序 flush 已自行兜底 */ }
       }
-    }
+      if (!text) return;
 
-    for (const sentence of sentences) {
-      this.sentences.push(sentence);
-      this.fullText += `${this.fullText ? '\n' : ''}${sentence}`;
-      this.transcriptRevision++;
-      this.syncTranscriptEditor();
-      this.updateTextActionVisibility();
-      this.analyzeCurrentSentence(sentence);
-      this.renderSubtitle(sentence, true);
-    }
+      let sentences = [text];
+      if (this.autoSegmentEnabled()) {
+        try {
+          const segmented = await this.api.segmentText(text);
+          if (segmented?.success && segmented.text) {
+            sentences = segmented.text.split('\n').map(s => s.trim()).filter(Boolean);
+            if (!sentences.length) sentences = [text];
+          }
+        } catch (_) {
+          // 断句失败：回退为整句，不丢内容
+        }
+      }
 
-    if (this.fullText.length - this.lastFeedbackText.length >= 30) {
-      this.requestRealtimeFeedback();
+      for (const sentence of sentences) {
+        this.sentences.push(sentence);
+        this.fullText += `${this.fullText ? '\n' : ''}${sentence}`;
+        this.transcriptRevision++;
+        this.syncTranscriptEditor();
+        this.updateTextActionVisibility();
+        this.analyzeCurrentSentence(sentence);
+        this.renderSubtitle(sentence, true);
+      }
+
+      if (this.fullText.length - this.lastFeedbackText.length >= 30) {
+        this.requestRealtimeFeedback();
+      }
+    })();
+
+    this.realtimeFlushChain = task;
+    try {
+      await task;
+    } catch (_) {
+      // 链内任务不应抛错（均已兜底），此处仅作防御
     }
   }
 
