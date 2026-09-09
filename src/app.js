@@ -926,6 +926,7 @@ class ExpressionTrainer {
       this.lastReport = '';
       this.lastMinutes = '';
       this.realtimePhraseBuffer = '';
+      this.realtimeFlushChain = null;
       this.realtimePhraseLastAt = 0;
       this.resetStats();
       this.subtitleContainer.innerHTML = '';
@@ -1660,6 +1661,7 @@ class ExpressionTrainer {
     this.pendingAudioPath = '';
     this.speakerSegments = [];
     this.realtimePhraseBuffer = '';
+    this.realtimeFlushChain = null;
     this.realtimePhraseLastAt = 0;
     this.subtitleContainer.innerHTML = '<div class="subtitle-line hint">点击下方按钮开始说话</div>';
     this.transcriptEditor.value = '';
@@ -1708,6 +1710,7 @@ class ExpressionTrainer {
     this.switchStage('optimize');
   }
 
+  // 与 punctuateTranscript 同构：改动需同步两份
   async polishTranscript() {
     const generation = this.activeSessionGeneration;
     const polishRevision = this.transcriptRevision;
@@ -1725,6 +1728,7 @@ class ExpressionTrainer {
       if (!this.isSessionCurrent(generation)) return;
       if (!result.success || !result.text) throw new Error(result.error || '错字修正失败');
       const polished = result.text.trim();
+      if (!polished) throw new Error('AI 返回内容为空，未做修改');
       if (this.transcriptRevision !== polishRevision) {
         this.workspace.notice('等待期间原文已变化，已放弃本次修正结果，请再次点击。');
         return;
@@ -1748,6 +1752,7 @@ class ExpressionTrainer {
     }
   }
 
+  // 与 polishTranscript 同构：改动需同步两份
   async punctuateTranscript() {
     const generation = this.activeSessionGeneration;
     const punctuateRevision = this.transcriptRevision;
@@ -1765,6 +1770,7 @@ class ExpressionTrainer {
       if (!this.isSessionCurrent(generation)) return;
       if (!result.success || !result.text) throw new Error(result.error || '补标点/断句失败');
       const polished = result.text.trim();
+      if (!polished) throw new Error('AI 返回内容为空，未做修改');
       if (this.transcriptRevision !== punctuateRevision) {
         this.workspace.notice('等待期间原文已变化，已放弃本次结果，请再次点击。');
         return;

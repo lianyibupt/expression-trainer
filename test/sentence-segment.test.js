@@ -67,3 +67,9 @@ test('numbers and abbreviations are not treated as sentence ends', () => {
   assert.doesNotMatch(out, /3\.14[。.．]/);
   assert.doesNotMatch(out, /U\.S\.[。.．]/);
 });
+
+test('abbreviation-guarded periods at a line end are not doubled', () => {
+  assert.equal(segmentTranscript('we ship to the U.S.').trim(), 'we ship to the U.S.');
+  const mixed = segmentTranscript('我们看一下美国市场 U.S. 的份额然后下周再定').split('\n').filter(Boolean);
+  assert.doesNotMatch(mixed.join(' '), /U\.S\.[。.．]/);
+});
