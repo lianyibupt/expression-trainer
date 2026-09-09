@@ -340,7 +340,13 @@ class ExpressionTrainer {
         const transcriptionResult = await this.api.transcribeAudioFile({ filePath, jobId });
         if (this.audioAnalysisCancelled) throw new Error('分析已取消');
         if (!transcriptionResult.success) throw new Error(transcriptionResult.error || '本地转写失败');
-        this.renderAudioAnalysis(transcriptionResult.audioAnalysis, transcriptionResult.transcription);
+        const transcription = transcriptionResult.transcription;
+        let displayText = transcription?.text || '';
+        if (transcription && this.autoSegmentEnabled()) {
+          const segmented = await this.api.segmentText(transcription?.text || '');
+          if (segmented?.success && segmented.text) displayText = segmented.text;
+        }
+        this.renderAudioAnalysis(transcriptionResult.audioAnalysis, transcription ? { ...transcription, text: displayText } : null);
       }
       this.setSessionStatus('音频分析完成');
     } catch (error) {
@@ -542,6 +548,10 @@ class ExpressionTrainer {
   async getSettings() {
     this.settings = await this.api.getSettings();
     return this.settings;
+  }
+
+  autoSegmentEnabled() {
+    return this.settings?.asr?.autoSegment !== false;
   }
 
   // ===== 录制控制 =====
@@ -1120,18 +1130,28 @@ class ExpressionTrainer {
 
     this.realtimePhraseBuffer = '';
     this.realtimePhraseLastAt = 0;
-    this.sentences.push(text);
-    this.fullText += `${this.fullText ? '\n' : ''}${text}`;
-    this.transcriptRevision++;
-    this.syncTranscriptEditor();
-    this.updateTextActionVisibility();
-    this.analyzeCurrentSentence(text);
+
+    let sentences = [text];
+    if (this.autoSegmentEnabled()) {
+      const segmented = await this.api.segmentText(text);
+      if (segmented?.success && segmented.text) {
+        sentences = segmented.text.split('\n').map(s => s.trim()).filter(Boolean);
+      }
+    }
+
+    for (const sentence of sentences) {
+      this.sentences.push(sentence);
+      this.fullText += `${this.fullText ? '\n' : ''}${sentence}`;
+      this.transcriptRevision++;
+      this.syncTranscriptEditor();
+      this.updateTextActionVisibility();
+      this.analyzeCurrentSentence(sentence);
+      this.renderSubtitle(sentence, true);
+    }
 
     if (this.fullText.length - this.lastFeedbackText.length >= 30) {
       this.requestRealtimeFeedback();
     }
-
-    this.renderSubtitle(text, true);
   }
 
   handleASRResult({ text, isFinal, asrMs, mode }) {
