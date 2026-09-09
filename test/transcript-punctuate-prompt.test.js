@@ -14,3 +14,12 @@ test('punctuate prompt only adds sentence punctuation and line breaks', () => {
   assert.match(prompt.system, /一句一行/);
   assert.equal(prompt.user.includes(source), true);
 });
+
+test('punctuate prompt guards particles, line wraps and blank lines', () => {
+  const prompt = getTranscriptPunctuatePrompt('A');
+  assert.match(prompt.system, /语气词/);
+  assert.match(prompt.system, /不要单独断成一句/);
+  assert.match(prompt.system, /同一说话人内/);
+  assert.match(prompt.system, /保留原文的空行分隔/);
+  assert.match(prompt.user, /^会议逐字稿：\n\n---\n/);
+});
