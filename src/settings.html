@@ -305,6 +305,15 @@
         <label>Qwen3-ASR 模型路径或模型 ID</label>
         <input type="text" id="qwen3-model-path" placeholder="Qwen/Qwen3-ASR-1.7B 或 /path/to/Qwen3-ASR-1.7B">
         <div class="hint">需要本机 Python 环境安装 qwen-asr；留空使用 Qwen/Qwen3-ASR-1.7B</div>
+        <div class="form-group" style="margin-top:10px;">
+          <label>Qwen3 转写语言</label>
+          <select id="qwen3-language">
+            <option value="auto">自动识别（推荐，适合中英混说）</option>
+            <option value="Chinese">中文为主</option>
+            <option value="English">English 为主</option>
+          </select>
+          <div class="hint">“自动识别”按语音片段判断语种；中英文夹杂的会议建议保持自动。个别偏科会议可在设置里固定中文或英文。</div>
+        </div>
       </div>
 
       <label class="checkbox-row">

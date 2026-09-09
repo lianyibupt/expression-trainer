@@ -63,6 +63,7 @@ class SettingsPage {
     this.asrModelHint = document.getElementById('asr-model-hint');
     this.sensevoiceModelPathInput = document.getElementById('sensevoice-model-path');
     this.qwen3ModelPathInput = document.getElementById('qwen3-model-path');
+    this.qwen3LanguageSelect = document.getElementById('qwen3-language');
     this.speakerDiarizationInput = document.getElementById('speaker-diarization');
     this.meetingOutputDirInput = document.getElementById('meeting-output-dir');
     this.autoStartRecordingInput = document.getElementById('auto-start-recording');
@@ -131,6 +132,7 @@ class SettingsPage {
     this.asrModelPresetSelect.value = modelPreset;
     this.sensevoiceModelPathInput.value = asr.modelPath || '';
     this.qwen3ModelPathInput.value = asr.qwen3ModelPath || '';
+    this.qwen3LanguageSelect.value = asr.qwen3Language || 'auto';
     this.speakerDiarizationInput.checked = asr.speakerDiarization !== false;
     this.meetingOutputDirInput.value = meeting.outputDir || '';
     this.autoStartRecordingInput.checked = Boolean(meeting.autoStartRecording);
@@ -293,6 +295,7 @@ class SettingsPage {
       modelPath: this.asrModelPresetSelect.value === 'sensevoice-custom' ? this.sensevoiceModelPathInput.value.trim() : '',
       qwen3ModelPath: this.qwen3ModelPathInput.value.trim(),
       speakerDiarization: this.speakerDiarizationInput.checked,
+      qwen3Language: this.qwen3LanguageSelect.value,
       language: 'zh'
     };
 

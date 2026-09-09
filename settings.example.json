@@ -23,6 +23,7 @@
     "modelPreset": "sensevoice-int8",
     "engine": "sensevoice",
     "modelPath": "",
+    "qwen3Language": "auto",
     "language": "zh"
   },
   "meeting": {
