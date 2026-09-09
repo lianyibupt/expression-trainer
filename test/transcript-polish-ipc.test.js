@@ -7,9 +7,11 @@ const feedback = fs.readFileSync(path.join(__dirname, '..', 'lib', 'ai-feedback.
 const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
 const preload = fs.readFileSync(path.join(__dirname, '..', 'preload.js'), 'utf8');
 
-test('ai-feedback exposes a transcript polish executor that reuses chunking', () => {
-  assert.match(feedback, /sendTranscriptPolish/);
-  assert.match(feedback, /splitMeetingText\(/);
+test('sendTranscriptPolish chunks via splitTranscriptForPolish and joins parts with a single newline', () => {
+  const executor = feedback.match(/async function sendTranscriptPolish[\s\S]*?\n}/);
+  assert.ok(executor, 'sendTranscriptPolish function body not found');
+  assert.match(executor[0], /splitTranscriptForPolish\(/);
+  assert.match(executor[0], /return parts\.join\('\\n'\)/);
   assert.match(feedback, /getTranscriptPolishPrompt\(/);
 });
 
