@@ -49,3 +49,21 @@ test('segmentLine returns [] for empty/whitespace input', () => {
   assert.deepEqual(segmentLine('   '), []);
   assert.deepEqual(segmentLine(''), []);
 });
+
+test('ASCII-punctuated lines are respected without duplicated endings', () => {
+  assert.deepEqual(
+    segmentTranscript('we are done. then we rest.').split('\n').filter(Boolean),
+    ['we are done.', 'then we rest.']
+  );
+});
+
+test('stacked connectives never become standalone sentences', () => {
+  const out = segmentTranscript('我们这次会议主要讨论下周的上线计划然后然后我再补充一下具体的时间安排');
+  assert.equal(out.includes('然后。'), false);
+});
+
+test('numbers and abbreviations are not treated as sentence ends', () => {
+  const out = segmentTranscript('今天的单价是 3.14 美元然后我们看下美国市场 U.S. 的报告吧下周再定');
+  assert.doesNotMatch(out, /3\.14[。.．]/);
+  assert.doesNotMatch(out, /U\.S\.[。.．]/);
+});
