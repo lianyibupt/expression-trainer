@@ -12,10 +12,15 @@ test('transcript polish prompt only fixes ASR errors and preserves spoken conten
   assert.match(prompt.system, /说话人标签/);
   assert.match(prompt.system, /【？】/);
   assert.match(prompt.system, /只输出修正后的全文/);
+  assert.match(prompt.system, /断句修正只调整行内标点/);
+  assert.match(prompt.system, /不得跨换行/);
+  assert.match(prompt.system, /边界约束/);
   assert.equal(prompt.user.includes(source), true);
+  assert.match(prompt.user, /^会议逐字稿：\n\n---\n/);
 });
 
 test('transcript polish prompt carries an optional glossary hint', () => {
   const prompt = getTranscriptPolishPrompt('hello', { glossary: 'A/B test' });
   assert.match(prompt.system, /A\/B test/);
+  assert.match(prompt.system, /## 用户术语\/人名表/);
 });
