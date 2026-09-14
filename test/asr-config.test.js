@@ -22,6 +22,7 @@ test('buildASRConfig keeps the existing streaming paraformer as a selectable pre
   assert.equal(config.modelPreset, 'paraformer-streaming');
   assert.equal(config.recognizerConfig.modelConfig.paraformer.encoder.endsWith('encoder.int8.onnx'), true);
   assert.equal(config.recognizerConfig.modelConfig.paraformer.decoder.endsWith('decoder.int8.onnx'), true);
+  assert.equal(config.expectedFileSizes['decoder.int8.onnx'], 71664561);
   assert.equal(config.recognizerConfig.modelConfig.numThreads, 4);
   assert.equal(config.recognizerConfig.enableEndpoint, true);
   assert.equal(config.recognizerConfig.rule1MinTrailingSilence, 1.2);
