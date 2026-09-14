@@ -1,4 +1,5 @@
 node_modules/
+.worktrees/
 .venv-qwen3-asr/
 .pip-cache/
 __pycache__/
