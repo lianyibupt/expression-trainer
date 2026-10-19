@@ -147,12 +147,13 @@
             </div>
             <div class="stage-actions">
               <button id="btn-copy-minutes" class="btn-sm hidden">复制全文</button>
-              <button id="btn-save-minutes" class="btn-sm hidden">保存</button>
+              <button id="btn-save-minutes" class="btn-sm hidden">保存 Markdown</button>
               <button id="btn-generate-minutes" class="btn-primary">生成纪要</button>
             </div>
           </div>
 
-          <div id="minutes-body" class="report-body">
+          <p id="minutes-status" class="minutes-status" role="status" aria-live="polite"></p>
+          <div id="minutes-body" class="report-body minutes-document">
             <p class="empty-state">完成录音或粘贴原文后，可以在这里生成正式会议纪要。</p>
           </div>
         </section>
@@ -274,6 +275,7 @@
 
   </template>
   <script src="meeting-sessions.js"></script>
+  <script src="markdown.js"></script>
   <script src="app.js"></script>
   <script src="workspace.js"></script>
 </body>

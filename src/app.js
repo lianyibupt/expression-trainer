@@ -115,6 +115,7 @@ class ExpressionTrainer {
     this.reportModal = this.root.getElementById('report-modal');
     this.reportBody = this.root.getElementById('report-body');
     this.minutesBody = this.root.getElementById('minutes-body');
+    this.minutesStatus = this.root.getElementById('minutes-status');
     this.statFillers = this.root.getElementById('stat-fillers');
     this.statHedges = this.root.getElementById('stat-hedges');
     this.statVague = this.root.getElementById('stat-vague');
@@ -237,6 +238,7 @@ class ExpressionTrainer {
     this.transcriptSource = this.session.startedAt ? 'edited' : 'pasted';
     this.updateTextActionVisibility();
     this.lastMinutes = '';
+    this.minutesStatus.textContent = '';
     this.btnCopyMinutes.classList.add('hidden');
     this.btnSaveMinutes.classList.add('hidden');
     this.minutesBody.innerHTML = '<p class="empty-state">原文已修改，请重新生成会议纪要。</p>';
@@ -925,6 +927,7 @@ class ExpressionTrainer {
       this.meetingSession = null;
       this.lastReport = '';
       this.lastMinutes = '';
+      this.minutesStatus.textContent = '';
       this.realtimePhraseBuffer = '';
       this.realtimeFlushChain = null;
       this.realtimePhraseLastAt = 0;
@@ -1418,7 +1421,9 @@ class ExpressionTrainer {
     }
     this.switchStage('minutes');
     this.setSessionStatus('生成纪要中');
-    this.minutesBody.textContent = '正在整理会议纪要...';
+    const status = this.minutesStatus;
+    status.textContent = '正在按议题整理结论、决策和待办…';
+    if (!this.lastMinutes) this.minutesBody.textContent = '正在整理会议纪要...';
     this.btnGenerateMinutes.disabled = true;
     const sessionDir = this.meetingSession?.sessionDir;
     try {
@@ -1429,11 +1434,14 @@ class ExpressionTrainer {
       this.lastMinutes = result.minutes;
       this.minutesSnapshot = snapshot;
       this.renderMinutes(result.minutes);
+      status.textContent = '';
       this.btnGenerateMinutes.textContent = '重新生成';
       this.setSessionStatus('纪要已生成');
     } catch (error) {
       if (!this.isSessionCurrent(generation)) return;
-      this.minutesBody.textContent = `生成失败：${error.message}`;
+      status.textContent = `生成失败：${error.message}${this.lastMinutes ? '。已保留上一次纪要。' : ''}`;
+      if (this.lastMinutes) this.renderMinutes(this.lastMinutes);
+      else this.minutesBody.textContent = '暂未生成纪要，请重试。';
       this.setSessionStatus('纪要生成失败');
     } finally {
       this.btnGenerateMinutes.disabled = false;
@@ -1441,14 +1449,7 @@ class ExpressionTrainer {
   }
 
   renderMarkdown(markdown) {
-    return String(markdown || '')
-      .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-      .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-      .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      .replace(/`([^`]+)`/g, '<code>$1</code>')
-      .replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
-      .replace(/\n/g, '<br>');
+    return MeetingMarkdown.render(markdown);
   }
 
   renderMinutes(minutes) {
@@ -1655,6 +1656,7 @@ class ExpressionTrainer {
     this.sentences = [];
     this.lastReport = '';
     this.lastMinutes = '';
+    this.minutesStatus.textContent = '';
     this.meetingSession = null;
     this.savedSnapshot = null;
     this.savedPath = '';
