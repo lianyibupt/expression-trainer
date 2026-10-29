@@ -208,6 +208,7 @@ class ExpressionTrainer {
   }
 
   setSessionStatus(text) {
+    if (this.session.status !== text) this.api.reportRuntimeState?.(this.session.id, text);
     if (this.sessionStatus) this.sessionStatus.textContent = text;
     this.session.status = text;
     this.workspace.render();

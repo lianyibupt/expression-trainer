@@ -12,6 +12,7 @@ const { MeetingActivityDetector } = require('./lib/meeting-activity-detector');
 const { pathToFileURL } = require('url');
 const { RecordingController } = require('./lib/recording-controller');
 const { segmentTranscript } = require('./lib/sentence-segment');
+const { log, startTask } = require('./lib/runtime-log');
 
 app.commandLine.appendSwitch('enable-features', [
   'MacLoopbackAudioForScreenShare',
@@ -30,11 +31,13 @@ const recordingController = new RecordingController({ initASR, feedAudio, stopRe
 let displayMediaHandlerReady = false;
 let nativeSystemAudioProcess = null;
 const meetingActivityDetector = new MeetingActivityDetector();
+let lastActivityLogAt = null;
 
 async function attachOpenSmileFeatures(wavPath, segments, report) {
   try {
     report.openSmile = { enabled: true, ...(await runOpenSmile(wavPath, segments)) };
   } catch (error) {
+    log('openSMILE', '声学特征提取不可用，继续使用基础音频分析', {}, 'WARN');
     report.openSmile = { enabled: false, error: error.message, speakers: [], segmentDetails: [] };
   }
   return report;
@@ -47,13 +50,20 @@ function normalizeAudioFile(inputPath) {
     const child = spawn('ffmpeg', ['-y', '-i', inputPath, '-ac', '1', '-ar', '16000', '-sample_fmt', 's16', outputPath], {
       stdio: ['ignore', 'ignore', 'pipe']
     });
+    const task = startTask('音频', '转码为 16 kHz 单声道 WAV', { pid: child.pid });
     let stderr = '';
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', chunk => { stderr += chunk; });
-    child.on('error', error => reject(error));
+    child.on('error', error => { task.fail(error); reject(error); });
     child.on('exit', code => {
-      if (code === 0 && fs.existsSync(outputPath)) resolve({ outputPath, tempDir });
-      else reject(new Error(stderr.trim() || `ffmpeg 转码失败，退出码 ${code}`));
+      if (code === 0 && fs.existsSync(outputPath)) {
+        task.done();
+        resolve({ outputPath, tempDir });
+      } else {
+        const error = new Error(stderr.trim() || `ffmpeg 转码失败，退出码 ${code}`);
+        task.fail(error, { exitCode: code });
+        reject(error);
+      }
     });
   });
 }
@@ -212,6 +222,7 @@ function decodeFloat32Base64(base64) {
 
 function stopNativeSystemAudio() {
   if (!nativeSystemAudioProcess) return;
+  log('系统音频', '停止采集系统输出');
 
   nativeSystemAudioProcess.kill('SIGTERM');
   nativeSystemAudioProcess = null;
@@ -224,6 +235,7 @@ function startNativeSystemAudio() {
 
   const helperPath = getNativeSystemAudioHelperPath();
   if (!fs.existsSync(helperPath)) {
+    log('系统音频', '系统音频 helper 尚未构建，将由界面尝试备用采集方式', {}, 'WARN');
     return {
       success: false,
       error: `系统音频 helper 尚未构建: ${helperPath}。请先运行 npm run build:system-audio-helper`
@@ -239,6 +251,7 @@ function startNativeSystemAudio() {
     return { success: false, error: error.message };
   }
   nativeSystemAudioProcess = child;
+  log('系统音频', '正在启动系统输出采集', { pid: child.pid });
 
   let stdoutBuffer = '';
 
@@ -252,6 +265,7 @@ function startNativeSystemAudio() {
     };
 
     const startupTimer = setTimeout(() => {
+      log('系统音频', '等待 helper 确认启动已超过 3 秒', {}, 'WARN');
       settle({ success: true, helperPath, startupTimedOut: true });
     }, 3000);
 
@@ -275,8 +289,10 @@ function startNativeSystemAudio() {
             });
           } else {
             if (event.event === 'started') {
+              log('系统音频', '系统输出采集已启动');
               settle({ success: true, helperPath });
             } else if (event.event === 'permission_required') {
+              log('系统音频', '需要屏幕与系统音频录制权限', {}, 'WARN');
               settle({
                 success: false,
                 error: event.message || 'Native 系统音频需要屏幕与系统音频录制权限'
@@ -287,17 +303,18 @@ function startNativeSystemAudio() {
             }
           }
         } catch (error) {
-          console.error('[NativeSystemAudio] 无法解析 helper 输出:', trimmed, error);
+          log('系统音频', '无法解析 helper 输出', {}, 'ERROR');
         }
       }
     });
 
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', chunk => {
-      console.error('[NativeSystemAudio]', chunk.trim());
+      log('系统音频', 'helper 输出诊断信息；若采集异常请检查系统权限', {}, 'WARN');
     });
 
     child.on('error', (error) => {
+      log('系统音频', '采集进程启动失败', { errorCode: error.code }, 'ERROR');
       if (nativeSystemAudioProcess === child) {
         nativeSystemAudioProcess = null;
       }
@@ -305,6 +322,7 @@ function startNativeSystemAudio() {
     });
 
     child.on('exit', (code, signal) => {
+      log('系统音频', '采集进程已退出', { exitCode: code, signal });
       const wasCurrent = nativeSystemAudioProcess === child;
       if (nativeSystemAudioProcess === child) {
         nativeSystemAudioProcess = null;
@@ -358,6 +376,9 @@ function createMainWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
+  mainWindow.webContents.on('did-finish-load', () => log('应用', '界面加载完成，等待操作'));
+  mainWindow.webContents.on('did-fail-load', (_event, code) => log('应用', '界面加载失败', { errorCode: code }, 'ERROR'));
+  mainWindow.webContents.on('render-process-gone', (_event, details) => log('应用', '界面进程已退出', { exitCode: details.exitCode }, 'ERROR'));
   mainWindow.setFullScreenable(true);
 
   mainWindow.on('closed', () => {
@@ -422,6 +443,13 @@ function createSettingsWindow() {
 
 // App lifecycle
 app.whenReady().then(() => {
+  const settings = loadSettings();
+  log('应用', '应用启动', {
+    modelPreset: settings.asr?.modelPreset, provider: settings.provider,
+    autoDetectMeeting: settings.meeting?.autoDetectMeeting,
+    autoStartRecording: settings.meeting?.autoStartRecording,
+    captureSystemAudio: settings.meeting?.captureSystemAudio
+  });
   setupDisplayMediaHandler();
 
   // macOS 需要显式创建应用菜单，否则菜单栏显示默认的 "Electron"
@@ -474,10 +502,22 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  log('应用', '应用正在退出');
   stopNativeSystemAudio();
 });
 
 // IPC Handlers
+// Only fixed UI states may enter the terminal; never forward arbitrary renderer text.
+const runtimeStates = new Set([
+  '待开始', '已有原文', '监听会议', '录制中', '自动录制中', '已暂停', '最终稿生成中', '待确认',
+  '最终稿为空，已保留实时稿', '本地音频分析中', '本地转写与说话人分离中', '音频分析完成',
+  '音频分析已取消', '音频分析失败', '结束录音失败', '生成报告中', '报告已生成', '报告生成失败',
+  '生成纪要中', '纪要已生成', '纪要生成失败', '已修正，待审阅', '错字修正失败', '补标点/断句失败'
+]);
+ipcMain.on('runtime-state', (_event, { sessionId, state } = {}) => {
+  if (!runtimeStates.has(state) || typeof sessionId !== 'string' || !/^[A-Za-z0-9-]{1,80}$/.test(sessionId)) return;
+  log('界面', state, { sessionId });
+});
 
 // 设置相关
 ipcMain.handle('get-settings', () => {
@@ -486,6 +526,7 @@ ipcMain.handle('get-settings', () => {
 
 ipcMain.handle('save-settings', (event, settings) => {
   saveSettings(settings);
+  log('设置', '设置已保存');
   return { success: true };
 });
 
@@ -567,6 +608,15 @@ ipcMain.handle('update-meeting-activity', (event, { hasInput, hasOutput, nowMs }
     hasInput: Boolean(hasInput),
     hasOutput: Boolean(hasOutput)
   });
+
+  if (action || lastActivityLogAt === null || Date.now() - lastActivityLogAt >= 30000) {
+    lastActivityLogAt = Date.now();
+    const messages = { start: '检测到持续声音，准备自动录音', review: '持续静音，等待用户确认保存', discard: '短时声音已忽略' };
+    log('会议监听', messages[action] || (meetingActivityDetector.isRecording ? '录制中，检查声音活动' : '监听中，等待持续声音'), {
+      hasInput: Boolean(hasInput), hasOutput: Boolean(hasOutput), isRecording: meetingActivityDetector.isRecording,
+      action, startAfterSec: meetingActivityDetector.startAfterMs / 1000, reviewAfterSec: meetingActivityDetector.reviewAfterMs / 1000
+    });
+  }
 
   return { action, isRecording: meetingActivityDetector.isRecording };
 });
@@ -689,6 +739,7 @@ ipcMain.handle('save-meeting-transcript', async (event, payload) => {
   const { transcript, stats, audioPath, speakerSegments, sessionId, title, startedAt, endedAt, transcriptRevision, transcriptSource } = payload;
   const settings = loadSettings();
   const rootDir = getMeetingOutputDir(settings);
+  const task = startTask('保存', '保存会议原文与录音', { sessionId });
 
   try {
     const transcriptResult = createTranscriptArtifact({
@@ -698,7 +749,10 @@ ipcMain.handle('save-meeting-transcript', async (event, payload) => {
       stats,
       now: new Date()
     });
-    if (!audioPath) return { success: true, ...transcriptResult };
+    if (!audioPath) {
+      task.done({ path: transcriptResult.sessionDir });
+      return { success: true, ...transcriptResult };
+    }
 
     const audioBaseAnalysis = analyzeAudioFile(audioPath, speakerSegments || []);
     const audioAnalysis = buildConversationAnalysis(await attachOpenSmileFeatures(audioPath, speakerSegments || [], audioBaseAnalysis), {
@@ -710,6 +764,7 @@ ipcMain.handle('save-meeting-transcript', async (event, payload) => {
       audioPath,
       audioAnalysis
     });
+    task.done({ path: transcriptResult.sessionDir });
     return {
       success: true,
       ...transcriptResult,
@@ -717,43 +772,46 @@ ipcMain.handle('save-meeting-transcript', async (event, payload) => {
       audioUrl: pathToFileURL(audioResult.audioPath).href
     };
   } catch (error) {
+    task.fail(error);
     return { success: false, error: error.message };
   }
 });
 
 ipcMain.handle('save-meeting-report', async (event, { sessionDir, transcript, report, stats, createdAt, sessionId, title, startedAt, endedAt, transcriptRevision, transcriptSource }) => {
+  const task = startTask('保存', '保存表达报告', { sessionId });
   try {
-    return {
-      success: true,
-      ...saveReportArtifact({
-        sessionId, title, startedAt, endedAt, transcriptRevision, transcriptSource,
-        sessionDir,
-        transcript,
-        report,
-        stats,
-        createdAt,
-        now: new Date()
-      })
-    };
+    const result = saveReportArtifact({
+      sessionId, title, startedAt, endedAt, transcriptRevision, transcriptSource,
+      sessionDir,
+      transcript,
+      report,
+      stats,
+      createdAt,
+      now: new Date()
+    });
+    task.done({ path: result.reportPath });
+    return { success: true, ...result };
   } catch (error) {
+    task.fail(error);
     return { success: false, error: error.message };
   }
 });
 
 ipcMain.handle('save-meeting-minutes', async (event, { sessionDir, transcript, minutes, stats, sessionId, title, startedAt, endedAt, transcriptRevision, transcriptSource }) => {
+  const task = startTask('保存', '保存会议纪要', { sessionId });
   try {
-    return {
-      success: true,
-      ...saveMinutesArtifact({
-        sessionId, title, startedAt, endedAt, transcriptRevision, transcriptSource,
-        sessionDir,
-        transcript,
-        minutes,
-        stats,
-        now: new Date()
-      })
-    };
+    const result = saveMinutesArtifact({
+      sessionId, title, startedAt, endedAt, transcriptRevision, transcriptSource,
+      sessionDir,
+      transcript,
+      minutes,
+      stats,
+      now: new Date()
+    });
+    task.done({ path: result.minutesPath });
+    return { success: true, ...result };
   } catch (error) {
+    task.fail(error);
     return { success: false, error: error.message };
   }
 });

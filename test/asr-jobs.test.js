@@ -65,3 +65,32 @@ test('Qwen workers use the local model cache without network probes by default',
   assert.equal(spawnOptions.env.HF_HUB_OFFLINE, '1');
   assert.equal(spawnOptions.env.TRANSFORMERS_OFFLINE, '1');
 });
+
+test('worker progress and speaker fallback reach the terminal without logging transcript contents', async t => {
+  const lines = [];
+  for (const method of ['log', 'warn', 'error']) t.mock.method(console, method, line => lines.push(line));
+  const sourcePath = path.join(__dirname, '../lib/asr.js');
+  const nativeRequire = createRequire(sourcePath);
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.stdout.setEncoding = child.stderr.setEncoding = () => {};
+  const sandbox = { module: { exports: {} }, __dirname: path.dirname(sourcePath), console,
+    Buffer, process, setTimeout, clearTimeout,
+    require: name => name === 'child_process' ? { spawn: () => child } : nativeRequire(name) };
+  vm.runInNewContext(fs.readFileSync(sourcePath, 'utf8') + '\nmodule.exports.runWorker = transcribeWithQwen3Python;', sandbox);
+  const progress = [];
+  const pending = sandbox.module.exports.runWorker(new Float32Array(16000), 'model', {
+    jobId: 'test-job', onProgress: payload => progress.push(payload.stage)
+  });
+  child.stdout.emit('data', '{"progress":true,"stage":"transcri');
+  child.stdout.emit('data', 'bing","processedSeconds":1,"totalSeconds":1}\n');
+  child.stdout.emit('data', '{"text":"private transcript","speaker_error":"sensitive error","speaker_count":0}\n');
+  child.emit('exit', 0);
+  assert.equal((await pending).text, 'private transcript');
+  assert.deepEqual(progress, ['loading-model', 'transcribing']);
+  assert.ok(lines.some(line => /音频转写/.test(line) && /jobId="test-job"/.test(line)));
+  assert.ok(lines.some(line => /说话人分离失败/.test(line)));
+  assert.ok(lines.some(line => /完成/.test(line) && /textChars=18/.test(line)));
+  assert.ok(!/private transcript|sensitive error/.test(lines.join('\n')));
+});
