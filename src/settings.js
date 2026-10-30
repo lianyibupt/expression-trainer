@@ -14,8 +14,8 @@ const PROVIDER_CONFIG = {
     needsKey: true,
     keyHint: '在 platform.deepseek.com 获取',
     models: [
-      { value: 'deepseek-chat', label: 'DeepSeek Chat（推荐）' },
-      { value: 'deepseek-coder', label: 'DeepSeek Coder' }
+      { value: 'deepseek-flash', label: 'DeepSeek Flash（推荐）' },
+      { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' }
     ]
   },
   ollama: {
@@ -210,6 +210,12 @@ class SettingsPage {
 
     // 设置模型下拉框（非 custom 模式）
     if (providerConfig.model && provider !== 'custom') {
+      if (![...this.modelSelect.options].some(option => option.value === providerConfig.model)) {
+        const option = document.createElement('option');
+        option.value = providerConfig.model;
+        option.textContent = `${providerConfig.model}（已保存的模型）`;
+        this.modelSelect.appendChild(option);
+      }
       this.modelSelect.value = providerConfig.model;
     }
   }

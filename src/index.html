@@ -8,6 +8,34 @@
 </head>
 <body>
   <div id="session-hosts"></div>
+  <section id="history-modal" class="exit-modal hidden" role="dialog" aria-modal="true" aria-labelledby="history-title">
+    <div class="exit-card history-card">
+      <div class="history-heading"><h2 id="history-title">历史会议</h2><button id="btn-history-close" class="btn-secondary">关闭</button></div>
+      <p id="history-directory" class="history-directory"></p>
+      <form id="history-search-form" class="history-search"><input id="history-search" type="search" placeholder="搜索会议名称或日期" aria-label="搜索历史会议"><button class="btn-primary" type="submit">搜索 / 刷新</button></form>
+      <p id="history-status" role="status"></p>
+      <div id="history-list" class="history-list"></div>
+      <button id="btn-history-more" class="btn-secondary hidden">加载更多</button>
+    </div>
+  </section>
+  <section id="exit-modal" class="exit-modal hidden" role="dialog" aria-modal="true" aria-labelledby="exit-title">
+    <div class="exit-card">
+      <p class="panel-eyebrow">Safe Exit</p>
+      <h2 id="exit-title">退出前保存会议信息</h2>
+      <p id="exit-summary" class="exit-summary"></p>
+      <ul id="exit-progress" class="exit-progress" aria-live="polite"></ul>
+      <p id="exit-error" class="exit-error hidden" role="alert"></p>
+      <div id="exit-fallback-actions" class="exit-fallback-actions hidden">
+        <button id="btn-exit-retry-final" class="btn-secondary">重试最终稿</button>
+        <button id="btn-exit-save-realtime" class="btn-secondary">保存现有实时稿</button>
+      </div>
+      <div class="exit-actions">
+        <button id="btn-exit-discard" class="btn-danger-subtle">放弃未保存内容并退出</button>
+        <button id="btn-exit-cancel" class="btn-secondary">取消退出</button>
+        <button id="btn-exit-save" class="btn-primary">保存全部并退出</button>
+      </div>
+    </div>
+  </section>
   <template id="session-template">
   <link rel="stylesheet" href="styles.css">
   <div class="app-shell">
@@ -27,6 +55,7 @@
       <nav class="meeting-navigation" aria-label="会议导航">
         <div id="meeting-tabs" class="meeting-tabs" role="tablist" aria-label="已打开的会议"></div>
         <button id="btn-new-session" class="btn-sm">＋ 新会议</button>
+        <button id="btn-history" class="btn-sm">历史会议</button>
         <select id="recent-sessions" aria-label="重新打开已关闭的会议"><option value="">最近关闭</option></select>
       </nav>
       <div class="meeting-context">
@@ -93,6 +122,18 @@
             </div>
           </div>
 
+          <div class="live-emotion-panel" aria-label="实时语气反馈">
+            <div class="live-emotion-heading"><strong>实时语气</strong><span id="live-emotion-status" role="status">开始录音后提供反馈</span></div>
+            <div id="live-emotion-categories" class="live-emotion-categories"></div>
+            <p id="live-emotion-detail">基于声音，每约 3 秒更新最近 6 秒的语气倾向</p>
+          </div>
+
+          <div class="audio-source-controls" role="group" aria-label="录音声音来源">
+            <button id="btn-microphone-source" class="btn-sm audio-source-toggle" type="button" aria-pressed="true" disabled title="只控制本应用是否录入麦克风，不影响会议软件发言">麦克风输入：开</button>
+            <button id="btn-system-source" class="btn-sm audio-source-toggle" type="button" aria-pressed="false" disabled title="录入电脑播放的声音，可在录音过程中切换">系统输出：关</button>
+            <span id="audio-source-status" class="audio-source-status" role="status">正在读取声音来源设置…</span>
+          </div>
+
           <div class="action-bar">
             <button id="btn-start" class="btn-main btn-start">
               <span class="btn-icon-inner">🎤</span>
@@ -122,6 +163,7 @@
             <div class="stage-actions">
               <button id="btn-copy-text" class="btn-sm hidden">复制</button>
               <button id="btn-save-text" class="btn-sm hidden">保存</button>
+              <button id="btn-export-text" class="btn-sm">导出 Markdown</button>
               <button id="btn-clear" class="btn-sm hidden">清空</button>
               <button id="btn-adopt-final" class="btn-sm hidden">采用最终稿（替换编辑稿）</button>
             </div>
@@ -274,9 +316,12 @@
   </div>
 
   </template>
+  <script src="../lib/meeting-exit.js"></script>
   <script src="meeting-sessions.js"></script>
   <script src="markdown.js"></script>
+  <script src="recording-audio.js"></script>
   <script src="app.js"></script>
+  <script src="history.js"></script>
   <script src="workspace.js"></script>
 </body>
 </html>

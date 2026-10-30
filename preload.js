@@ -2,6 +2,15 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
   reportRuntimeState: (sessionId, state) => ipcRenderer.send('runtime-state', { sessionId, state }),
+  // 应用安全退出
+  onAppExitRequested: (callback) => {
+    ipcRenderer.on('app-exit-requested', () => callback());
+    ipcRenderer.send('app-exit-ready');
+  },
+  approveAppExit: () => ipcRenderer.invoke('approve-app-exit'),
+  cancelAppExit: () => ipcRenderer.invoke('cancel-app-exit'),
+  forceAppExit: () => ipcRenderer.invoke('force-app-exit'),
+
   // 设置
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
@@ -21,6 +30,10 @@ contextBridge.exposeInMainWorld('api', {
     return ipcRenderer.invoke('feed-audio', copy.buffer, sessionId);
   },
   stopASR: (sessionId) => ipcRenderer.invoke('stop-asr', sessionId),
+  pauseLiveEmotion: (sessionId, paused) => ipcRenderer.invoke('pause-live-emotion', sessionId, paused),
+  onLiveEmotion: callback => {
+    ipcRenderer.on('live-emotion', (event, data) => callback(data));
+  },
   updateMeetingActivity: (payload) => ipcRenderer.invoke('update-meeting-activity', payload),
   markMeetingRecordingStarted: () => ipcRenderer.invoke('mark-meeting-recording-started'),
   markMeetingRecordingStopped: () => ipcRenderer.invoke('mark-meeting-recording-stopped'),
@@ -65,6 +78,8 @@ contextBridge.exposeInMainWorld('api', {
   saveMeetingTranscript: (payload) => ipcRenderer.invoke('save-meeting-transcript', payload),
   saveMeetingReport: (payload) => ipcRenderer.invoke('save-meeting-report', payload),
   saveMeetingMinutes: (payload) => ipcRenderer.invoke('save-meeting-minutes', payload),
+  listMeetingHistory: options => ipcRenderer.invoke('list-meeting-history', options),
+  readMeetingHistory: archiveId => ipcRenderer.invoke('read-meeting-history', archiveId),
   selectAudioFile: () => ipcRenderer.invoke('select-audio-file'),
   analyzeAudioFile: (payload) => ipcRenderer.invoke('analyze-audio-file', payload),
   transcribeAudioFile: (payload) => ipcRenderer.invoke('transcribe-audio-file', payload),

@@ -5,11 +5,45 @@ class MeetingWorkspace {
     this.template = document.getElementById('session-template');
     this.monitorApp = null;
     this.monitorStarting = null;
+    this.audioSourceSelection = null;
+    this.exitModal = document.getElementById('exit-modal');
+    this.exitSummary = document.getElementById('exit-summary');
+    this.exitProgress = document.getElementById('exit-progress');
+    this.exitError = document.getElementById('exit-error');
+    this.exitFallbackActions = document.getElementById('exit-fallback-actions');
+    this.btnExitSave = document.getElementById('btn-exit-save');
+    this.btnExitCancel = document.getElementById('btn-exit-cancel');
+    this.btnExitDiscard = document.getElementById('btn-exit-discard');
+    this.exitState = 'idle';
+    this.exitPending = [];
+    this.exitProgressById = new Map();
+    this.exitIndex = 0;
+    this.exitFailure = null;
+    this.exitControls = new Map();
+    this.bindExitEvents();
+    this.history = new MeetingHistoryPanel(this);
     this.create();
   }
 
-  create() {
-    const session = this.sessions.create();
+  bindExitEvents() {
+    window.api.onAppExitRequested(() => this.handleAppExitRequest());
+    this.btnExitSave.addEventListener('click', () => this.saveAllAndExit());
+    this.btnExitCancel.addEventListener('click', () => this.cancelExit());
+    this.btnExitDiscard.addEventListener('click', () => this.confirmDiscardAndExit());
+    document.getElementById('btn-exit-retry-final').addEventListener('click', () => this.retryFailedFinalTranscript());
+    document.getElementById('btn-exit-save-realtime').addEventListener('click', () => this.acceptFailedRealtimeTranscript());
+    this.exitModal.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && this.exitState !== 'saving') {
+        event.preventDefault();
+        this.cancelExit();
+      }
+    });
+  }
+
+  create({ record } = {}) {
+    const session = this.sessions.create(record?.sessionId);
+    if (record) Object.assign(session, { title: record.title, startedAt: record.startedAt,
+      endedAt: record.endedAt, archiveId: record.archiveId, restored: true });
     const host = document.createElement('div');
     const root = host.attachShadow({ mode: 'open' });
     root.appendChild(this.template.content.cloneNode(true));
@@ -19,6 +53,7 @@ class MeetingWorkspace {
     session.trainer = new ExpressionTrainer({ root, session, workspace: this,
       api: createSessionAPI(window.api, session.id) });
     root.getElementById('btn-new-session').addEventListener('click', () => this.create());
+    root.getElementById('btn-history').addEventListener('click', () => this.history.show());
     root.getElementById('meeting-tabs').addEventListener('click', event => {
       const button = event.target.closest('button[data-session]');
       if (!button) return;
@@ -55,6 +90,19 @@ class MeetingWorkspace {
     return session.trainer;
   }
 
+  async openArchivedMeeting(record) {
+    if (this.exitState !== 'idle') return;
+    const existing = this.sessions.get(record.sessionId);
+    if (existing) {
+      this.select(existing.id);
+      this.notice('这场会议已在工作区中打开，已保留当前内容。');
+      return;
+    }
+    const trainer = this.create({ record });
+    await trainer.restoreArchive(record);
+    this.render();
+  }
+
   select(id, focus = false) {
     if (!this.sessions.select(id)) return;
     this.render();
@@ -85,6 +133,7 @@ class MeetingWorkspace {
   }
 
   async beginCapture(trainer) {
+    if (this.exitState !== 'idle') return false;
     if (!this.sessions.claimRecording(trainer.session.id)) {
       this.notice('已有会议正在录音，请先结束当前录音。');
       return false;
@@ -107,6 +156,7 @@ class MeetingWorkspace {
   }
 
   async startMonitor(trainer) {
+    if (this.exitState !== 'idle') return;
     if (this.sessions.recordingId || this.monitorStarting || this.monitorApp?.activityMonitor) return;
     this.monitorApp = trainer;
     this.monitorStarting = trainer.startActivityMonitor({ claimed: true });
@@ -114,9 +164,224 @@ class MeetingWorkspace {
     finally { this.monitorStarting = null; }
   }
 
+  async handleAppExitRequest() {
+    if (this.exitState !== 'idle') return;
+    this.history?.hide();
+    const pending = collectPendingMeetings([...this.sessions.items.values()]);
+    if (!pending.length) {
+      this.exitState = 'approved';
+      await window.api.approveAppExit();
+      return;
+    }
+
+    this.exitPending = pending;
+    this.exitIndex = 0;
+    this.exitFailure = null;
+    this.exitState = 'confirming';
+    this.exitProgressById = new Map(pending.map(item => [item.id, {
+      state: 'pending',
+      label: this.describeInitialExitWork(item)
+    }]));
+    this.setExitLocked(true);
+    this.resetExitActions();
+    this.renderExitModal();
+    this.exitModal.classList.remove('hidden');
+    queueMicrotask(() => this.btnExitSave.focus());
+  }
+
+  describeInitialExitWork(item) {
+    if (item.reason === 'recording') return '待结束录音并等待最终稿';
+    if (item.reason === 'finalizing') return '等待最终稿';
+    if (item.reason === 'saving') return '等待现有保存完成';
+    if (item.reason === 'generating') return '等待已有报告或纪要生成完成';
+    const names = { transcript: '原文/录音', minutes: '纪要', report: '报告' };
+    const artifacts = item.artifacts.map(name => names[name] || name).join('、');
+    return artifacts ? `待保存：${artifacts}` : '待保存';
+  }
+
+  renderExitModal() {
+    const savedCount = [...this.exitProgressById.values()].filter(item => item.state === 'saved').length;
+    this.exitSummary.textContent = this.exitState === 'discard-confirm'
+      ? '这会永久放弃下列会议尚未保存的内容。应用退出后无法恢复。'
+      : `共 ${this.exitPending.length} 场会议需要处理；已保存 ${savedCount} 场。应用只会保存已有内容，不会生成新的纪要或报告。`;
+    this.exitProgress.innerHTML = this.exitPending.map(item => {
+      const progress = this.exitProgressById.get(item.id) || { state: 'pending', label: '待处理' };
+      return `<li class="exit-progress-row is-${progress.state}" data-exit-session="${item.id}"><span class="exit-meeting-title">${this.escapeHtml(item.title)}</span><span class="exit-progress-label">${this.escapeHtml(progress.label)}</span></li>`;
+    }).join('');
+  }
+
+  resetExitActions() {
+    this.exitError.classList.add('hidden');
+    this.exitError.textContent = '';
+    this.exitFallbackActions.classList.add('hidden');
+    this.btnExitSave.textContent = '保存全部并退出';
+    this.btnExitSave.disabled = false;
+    this.btnExitCancel.disabled = false;
+    this.btnExitDiscard.disabled = false;
+    this.btnExitDiscard.textContent = '放弃未保存内容并退出';
+  }
+
+  async saveAllAndExit() {
+    if (this.exitState === 'saving' || this.exitState === 'approved' || this.exitState === 'discard-confirm') return;
+    this.exitState = 'saving';
+    this.exitFailure = null;
+    this.exitError.classList.add('hidden');
+    this.exitFallbackActions.classList.add('hidden');
+    this.btnExitSave.disabled = true;
+    this.btnExitCancel.disabled = true;
+    this.btnExitDiscard.disabled = true;
+
+    for (; this.exitIndex < this.exitPending.length; this.exitIndex += 1) {
+      const item = this.exitPending[this.exitIndex];
+      const session = this.sessions.get(item.id);
+      const trainer = session?.trainer;
+      if (!trainer) {
+        this.showExitFailure(session || item, { success: false, stage: 'saving', error: '会议实例不存在' });
+        return;
+      }
+
+      const currentState = trainer.isRecording || trainer.isStoppingRecording
+        ? '正在结束录音并等待最终稿'
+        : trainer.awaitingFinalTranscript ? '等待最终稿' : '正在保存';
+      this.exitProgressById.set(item.id, { state: 'working', label: currentState });
+      this.renderExitModal();
+
+      let result;
+      try {
+        result = await trainer.prepareForExit();
+      } catch (error) {
+        result = { success: false, stage: 'saving', error: error.message };
+      }
+      if (!result?.success) {
+        this.showExitFailure(session, result || { stage: 'saving', error: '未知错误' });
+        return;
+      }
+
+      this.exitProgressById.set(item.id, { state: 'saved', label: '已保存' });
+      this.renderExitModal();
+    }
+
+    if (this.exitState !== 'saving') return;
+    this.exitState = 'approved';
+    this.btnExitSave.textContent = '已保存，正在退出…';
+    await window.api.approveAppExit();
+  }
+
+  showExitFailure(session, result) {
+    this.exitState = 'failed';
+    this.exitFailure = { sessionId: session.id, result };
+    const finalFailure = result.stage === 'final-transcript';
+    this.exitProgressById.set(session.id, {
+      state: 'failed',
+      label: finalFailure ? '最终稿失败' : result.stage === 'stopping' ? '结束录音失败' : '保存失败'
+    });
+    this.renderExitModal();
+    this.exitError.textContent = `《${session.title}》处理失败：${result.error || '未知错误'}。应用仍保持打开。`;
+    this.exitError.classList.remove('hidden');
+    this.exitFallbackActions.classList.toggle('hidden', !finalFailure);
+    document.getElementById('btn-exit-save-realtime').disabled = !result.canSaveRealtime;
+    this.btnExitSave.textContent = finalFailure ? '等待选择最终稿处理方式' : '重试保存';
+    this.btnExitSave.disabled = finalFailure;
+    this.btnExitCancel.disabled = false;
+    this.btnExitDiscard.disabled = false;
+  }
+
+  async retryFailedFinalTranscript() {
+    if (this.exitState !== 'failed' || this.exitFailure?.result.stage !== 'final-transcript') return;
+    const session = this.sessions.get(this.exitFailure.sessionId);
+    this.exitState = 'saving';
+    this.exitError.classList.add('hidden');
+    this.exitFallbackActions.classList.add('hidden');
+    this.btnExitCancel.disabled = true;
+    this.btnExitDiscard.disabled = true;
+    this.exitProgressById.set(session.id, { state: 'working', label: '正在重试最终稿' });
+    this.renderExitModal();
+    const result = await session.trainer.retryFinalTranscript();
+    if (!result.success) {
+      this.showExitFailure(session, { stage: 'final-transcript', ...result });
+      return;
+    }
+    this.exitState = 'failed';
+    this.exitFailure = null;
+    await this.saveAllAndExit();
+  }
+
+  async acceptFailedRealtimeTranscript() {
+    if (this.exitState !== 'failed' || this.exitFailure?.result.stage !== 'final-transcript') return;
+    const session = this.sessions.get(this.exitFailure.sessionId);
+    const result = session.trainer.acceptRealtimeTranscriptForExit();
+    if (!result.success) {
+      this.showExitFailure(session, { stage: 'final-transcript', ...result });
+      return;
+    }
+    this.exitFailure = null;
+    await this.saveAllAndExit();
+  }
+
+  async cancelExit() {
+    if (this.exitState === 'saving' || this.exitState === 'approved') return;
+    this.exitState = 'idle';
+    this.exitPending = [];
+    this.exitProgressById.clear();
+    this.exitIndex = 0;
+    this.exitFailure = null;
+    this.exitModal.classList.add('hidden');
+    this.setExitLocked(false);
+    this.resetExitActions();
+    await window.api.cancelAppExit();
+  }
+
+  async confirmDiscardAndExit() {
+    if (this.exitState === 'saving' || this.exitState === 'approved') return;
+    if (this.exitState !== 'discard-confirm') {
+      this.exitState = 'discard-confirm';
+      this.exitError.textContent = '确认后将不再尝试保存。请仅在你明确接受数据丢失时继续。';
+      this.exitError.classList.remove('hidden');
+      this.exitFallbackActions.classList.add('hidden');
+      this.btnExitSave.disabled = true;
+      this.btnExitDiscard.textContent = '确认放弃并退出';
+      this.renderExitModal();
+      this.btnExitDiscard.focus();
+      return;
+    }
+    this.exitState = 'approved';
+    this.btnExitDiscard.disabled = true;
+    await window.api.forceAppExit();
+  }
+
+  setExitLocked(locked) {
+    const selector = [
+      '#btn-new-session', '#btn-start', '#btn-paste', '#btn-pause', '#btn-resume', '#btn-stop',
+      '#btn-stop-recording', '#btn-report', '#btn-generate-minutes', '#btn-audio-select',
+      '#btn-audio-analyze', '#btn-audio-transcribe', '#btn-clear', '#btn-polish-transcript',
+      '#btn-punctuate-transcript', '#meeting-title', '#transcript-editor', '#btn-history',
+      '#btn-microphone-source', '#btn-system-source', '#btn-review-save', '#btn-review-report', '#btn-review-discard'
+    ].join(',');
+    if (locked) {
+      for (const session of this.sessions.items.values()) {
+        if (!session.root) continue;
+        session.host.inert = true;
+        for (const control of session.root.querySelectorAll(selector)) {
+          if (!this.exitControls.has(control)) this.exitControls.set(control, control.disabled);
+          control.disabled = true;
+        }
+      }
+      return;
+    }
+    for (const [control, wasDisabled] of this.exitControls) control.disabled = wasDisabled;
+    for (const session of this.sessions.items.values()) if (session.host) session.host.inert = false;
+    this.exitControls.clear();
+    this.render();
+  }
+
+  escapeHtml(text) {
+    return String(text).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+  }
+
   render() {
     const all = [...this.sessions.items.values()];
     const recording = this.sessions.get(this.sessions.recordingId);
+    const exitLocked = this.exitState !== 'idle';
     for (const session of all) {
       if (!session.root) continue;
       const { root, trainer } = session;
@@ -149,11 +414,11 @@ class MeetingWorkspace {
         root.getElementById('meeting-save-status').textContent = trainer.savePromise ? '正在保存本场会议…' : saved ? `${changed ? '有未保存修改' : '已保存'}：${trainer.savedPath || trainer.meetingSession?.sessionDir || ''}` : '未保存';
         root.getElementById('btn-save-text').textContent = `保存《${session.title}》原文`;
         root.getElementById('btn-review-save').textContent = `保存《${session.title}》原文`;
-        root.getElementById('btn-start').disabled = Boolean(recording && recording !== session);
+        root.getElementById('btn-start').disabled = exitLocked || Boolean(recording && recording !== session);
       }
       root.getElementById('recording-banner').classList.toggle('hidden', !recording);
       root.getElementById('recording-banner-text').textContent = recording ? `正在录制《${recording.title}》 · ${recording.trainer?.timer.textContent || '00:00'}${recording.trainer?.isPaused ? '（已暂停）' : ''}` : '';
-      root.getElementById('btn-stop-recording').disabled = Boolean(recording?.trainer?.isStartingRecording || recording?.trainer?.isStoppingRecording);
+      root.getElementById('btn-stop-recording').disabled = exitLocked || Boolean(recording?.trainer?.isStartingRecording || recording?.trainer?.isStoppingRecording);
     }
   }
 }

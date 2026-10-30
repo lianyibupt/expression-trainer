@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, session, Menu, desktopCapturer } = require('electron');
+const { app, BrowserWindow, ipcMain, session, Menu, desktopCapturer, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -13,6 +13,10 @@ const { pathToFileURL } = require('url');
 const { RecordingController } = require('./lib/recording-controller');
 const { segmentTranscript } = require('./lib/sentence-segment');
 const { log, startTask } = require('./lib/runtime-log');
+const { LiveEmotion, EmotionWorker } = require('./lib/live-emotion');
+const { AppExitGate } = require('./lib/app-exit-gate');
+const { resolveArchive, listMeetingHistory, readMeetingHistory } = require('./lib/meeting-history');
+const { DEFAULT_DEEPSEEK_MODEL, normalizeDeepSeekSettings } = require('./lib/deepseek-config');
 
 app.commandLine.appendSwitch('enable-features', [
   'MacLoopbackAudioForScreenShare',
@@ -27,7 +31,15 @@ app.setName('智能表达训练');
 let mainWindow;
 let settingsWindow;
 let promptEditorWindow;
+let exitGate;
+let rendererUnavailable = false;
 const recordingController = new RecordingController({ initASR, feedAudio, stopRecognition });
+const emotionWorker = new EmotionWorker();
+const liveEmotion = new LiveEmotion({
+  infer: samples => emotionWorker.infer(samples),
+  warmup: () => emotionWorker.start(),
+  close: () => emotionWorker.close()
+});
 let displayMediaHandlerReady = false;
 let nativeSystemAudioProcess = null;
 const meetingActivityDetector = new MeetingActivityDetector();
@@ -88,7 +100,7 @@ function saveCustomPrompt(data) {
 // 各 Provider 的默认配置
 const DEFAULT_PROVIDER_CONFIGS = {
   openai: { apiKey: '', model: 'gpt-4o-mini' },
-  deepseek: { apiKey: '', model: 'deepseek-chat' },
+  deepseek: { apiKey: '', model: DEFAULT_DEEPSEEK_MODEL },
   ollama: { ollamaUrl: 'http://localhost:11434', model: 'qwen2.5:7b' },
   custom: { apiKey: '', baseUrl: '', model: '' }
 };
@@ -128,7 +140,7 @@ function getSettingsPath() {
 function loadSettings() {
   const settingsPath = getSettingsPath();
   if (fs.existsSync(settingsPath)) {
-    const raw = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+    const raw = normalizeDeepSeekSettings(JSON.parse(fs.readFileSync(settingsPath, 'utf-8')));
     // 兼容旧版扁平结构 → 迁移到 per-provider 结构
     if (!raw.providers) {
       const migrated = {
@@ -226,6 +238,22 @@ function stopNativeSystemAudio() {
 
   nativeSystemAudioProcess.kill('SIGTERM');
   nativeSystemAudioProcess = null;
+}
+
+function requestSafeExit(event) {
+  if (!exitGate) return true;
+  if (rendererUnavailable && exitGate.state !== 'approved') {
+    const choice = dialog.showMessageBoxSync(mainWindow, {
+      type: 'warning', buttons: ['保留应用', '退出应用'], defaultId: 0, cancelId: 0,
+      message: '界面当前无法响应保存请求',
+      detail: '已保存的会议仍保留在磁盘中。当前界面中的未保存内容可能无法恢复。选择退出将关闭应用。'
+    });
+    if (choice === 1) { exitGate.approve(); setImmediate(() => app.quit()); }
+    else { event.preventDefault(); return false; }
+  }
+  if (exitGate.request()) return true;
+  event.preventDefault();
+  return false;
 }
 
 function startNativeSystemAudio() {
@@ -362,6 +390,7 @@ function setupDisplayMediaHandler() {
 }
 
 function createMainWindow() {
+  rendererUnavailable = false;
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -377,9 +406,23 @@ function createMainWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
   mainWindow.webContents.on('did-finish-load', () => log('应用', '界面加载完成，等待操作'));
-  mainWindow.webContents.on('did-fail-load', (_event, code) => log('应用', '界面加载失败', { errorCode: code }, 'ERROR'));
-  mainWindow.webContents.on('render-process-gone', (_event, details) => log('应用', '界面进程已退出', { exitCode: details.exitCode }, 'ERROR'));
+  mainWindow.webContents.on('did-fail-load', (_event, code, _description, _url, isMainFrame) => {
+    if (isMainFrame && code !== -3) rendererUnavailable = true;
+    log('应用', '界面加载失败', { errorCode: code }, 'ERROR');
+  });
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    rendererUnavailable = true;
+    log('应用', '界面进程已退出', { exitCode: details.exitCode }, 'ERROR');
+  });
+  mainWindow.on('unresponsive', () => { rendererUnavailable = true; });
+  mainWindow.on('responsive', () => { rendererUnavailable = false; });
   mainWindow.setFullScreenable(true);
+  exitGate = new AppExitGate(() => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('app-exit-requested');
+    }
+  });
+  mainWindow.on('close', requestSafeExit);
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -495,20 +538,31 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  if (liveEmotion.sessionId) liveEmotion.stop(liveEmotion.sessionId);
   stopNativeSystemAudio();
   if (process.platform !== 'darwin') {
     app.quit();
   }
 });
 
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
+  if (!requestSafeExit(event)) return;
+  emotionWorker.close();
   log('应用', '应用正在退出');
   stopNativeSystemAudio();
 });
 
 // IPC Handlers
+ipcMain.on('app-exit-ready', event => {
+  if (event.sender !== mainWindow?.webContents) return;
+  rendererUnavailable = false;
+  exitGate?.rendererReady();
+});
 // Only fixed UI states may enter the terminal; never forward arbitrary renderer text.
 const runtimeStates = new Set([
+  '麦克风输入已开启', '麦克风输入已关闭', '麦克风输入开启失败',
+  '系统输出已开启', '系统输出已关闭', '系统输出开启失败',
+  '麦克风输入已选择', '系统输出已选择',
   '待开始', '已有原文', '监听会议', '录制中', '自动录制中', '已暂停', '最终稿生成中', '待确认',
   '最终稿为空，已保留实时稿', '本地音频分析中', '本地转写与说话人分离中', '音频分析完成',
   '音频分析已取消', '音频分析失败', '结束录音失败', '生成报告中', '报告已生成', '报告生成失败',
@@ -517,6 +571,23 @@ const runtimeStates = new Set([
 ipcMain.on('runtime-state', (_event, { sessionId, state } = {}) => {
   if (!runtimeStates.has(state) || typeof sessionId !== 'string' || !/^[A-Za-z0-9-]{1,80}$/.test(sessionId)) return;
   log('界面', state, { sessionId });
+});
+
+ipcMain.handle('cancel-app-exit', () => {
+  exitGate?.cancel();
+  return { success: true };
+});
+
+ipcMain.handle('approve-app-exit', () => {
+  exitGate?.approve();
+  app.quit();
+  return { success: true };
+});
+
+ipcMain.handle('force-app-exit', () => {
+  exitGate?.approve();
+  app.quit();
+  return { success: true };
 });
 
 // 设置相关
@@ -558,6 +629,9 @@ ipcMain.handle('init-asr', async (event, sessionId) => {
   try {
     const settings = loadSettings();
     const runtime = await recordingController.start(sessionId, settings.asr || DEFAULT_ASR_CONFIG);
+    liveEmotion.start(sessionId, payload => {
+      if (!event.sender.isDestroyed()) event.sender.send('live-emotion', payload);
+    });
     return { success: true, ...runtime };
   } catch (error) {
     return { success: false, error: error.message };
@@ -578,11 +652,13 @@ function normalizeAudioSamples(payload) {
 ipcMain.handle('feed-audio', (event, samplesPayload, sessionId) => {
   const samples = normalizeAudioSamples(samplesPayload);
   const result = recordingController.feed(sessionId, samples);
+  if (recordingController.activeId === sessionId) liveEmotion.feed(sessionId, samples);
   return result; // { text, isFinal } or null
 });
 
 ipcMain.handle('stop-asr', async (event, sessionId) => {
   const sender = event.sender;
+  liveEmotion.stop(sessionId);
   const result = await recordingController.stop(sessionId, (payload) => {
     if (payload?.finalText) payload.finalText = applyAutoSegmentText(payload.finalText);
     if (!sender.isDestroyed()) {
@@ -594,6 +670,11 @@ ipcMain.handle('stop-asr', async (event, sessionId) => {
   }
   if (result?.finalText) result.finalText = applyAutoSegmentText(result.finalText);
   return { success: true, ...result };
+});
+
+ipcMain.handle('pause-live-emotion', (event, sessionId, paused) => {
+  if (recordingController.activeId === sessionId) liveEmotion.pause(sessionId, paused);
+  return { success: true };
 });
 
 ipcMain.handle('update-meeting-activity', (event, { hasInput, hasOutput, nowMs }) => {
@@ -719,11 +800,7 @@ ipcMain.handle('transcribe-audio-file', async (event, { filePath, sessionId, job
       onProgress: progress => event.sender.send('audio-analysis-progress', { ...progress, sessionId, jobId })
     });
     event.sender.send('audio-analysis-progress', { sessionId, jobId, stage: 'opensmile', processedSeconds: 0, totalSeconds: 0, detail: 'openSMILE 声学特征提取中' });
-    const baseAnalysis = await attachOpenSmileFeatures(
-      normalized.outputPath,
-      transcription?.speaker_segments || [],
-      analyzeAudioFile(normalized.outputPath, transcription?.speaker_segments || [])
-    );
+    const baseAnalysis = await attachOpenSmileFeatures(normalized.outputPath, [], analyzeAudioFile(normalized.outputPath));
     const audioAnalysis = buildConversationAnalysis(baseAnalysis, transcription);
     return { success: true, audioAnalysis, transcription };
   } catch (error) {
@@ -744,6 +821,8 @@ ipcMain.handle('save-meeting-transcript', async (event, payload) => {
   try {
     const transcriptResult = createTranscriptArtifact({
       sessionId, title, startedAt, endedAt, transcriptRevision, transcriptSource,
+      speakerSegments: speakerSegments || [],
+      sessionDir: payload.archiveId ? resolveArchive(rootDir, payload.archiveId) : undefined,
       rootDir,
       transcript,
       stats,
@@ -754,8 +833,8 @@ ipcMain.handle('save-meeting-transcript', async (event, payload) => {
       return { success: true, ...transcriptResult };
     }
 
-    const audioBaseAnalysis = analyzeAudioFile(audioPath, speakerSegments || []);
-    const audioAnalysis = buildConversationAnalysis(await attachOpenSmileFeatures(audioPath, speakerSegments || [], audioBaseAnalysis), {
+    const audioBaseAnalysis = analyzeAudioFile(audioPath);
+    const audioAnalysis = buildConversationAnalysis(audioBaseAnalysis, {
       text: transcript,
       speaker_segments: speakerSegments || []
     });
@@ -775,6 +854,20 @@ ipcMain.handle('save-meeting-transcript', async (event, payload) => {
     task.fail(error);
     return { success: false, error: error.message };
   }
+});
+
+ipcMain.handle('list-meeting-history', (_event, options = {}) => {
+  try {
+    const rootDir = getMeetingOutputDir(loadSettings());
+    return { success: true, meetings: listMeetingHistory(rootDir, options), rootDir };
+  } catch (error) { return { success: false, error: error.message }; }
+});
+
+ipcMain.handle('read-meeting-history', (_event, archiveId) => {
+  try {
+    const meeting = readMeetingHistory(getMeetingOutputDir(loadSettings()), archiveId);
+    return { success: true, meeting: { ...meeting, audioUrl: meeting.audioPath ? pathToFileURL(meeting.audioPath).href : '' } };
+  } catch (error) { return { success: false, error: error.message }; }
 });
 
 ipcMain.handle('save-meeting-report', async (event, { sessionDir, transcript, report, stats, createdAt, sessionId, title, startedAt, endedAt, transcriptRevision, transcriptSource }) => {

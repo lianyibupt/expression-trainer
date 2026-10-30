@@ -10,8 +10,12 @@ class ExpressionTrainer {
     this.transcriptSource = 'realtime';
     this.editorModified = false;
     this.savePromise = null;
+    this.savedArtifacts = { minutes: '', report: '' };
     this.finalArtifactRefreshPromise = null;
     this.finalCandidate = null;
+    this.finalTranscriptWaiter = null;
+    this.finalTranscriptResult = null;
+    this.suppressReviewOnFinal = false;
     this.isStartingRecording = false;
     this.pendingAudioFeeds = new Set();
     this.isRecording = false;
@@ -31,13 +35,11 @@ class ExpressionTrainer {
     this.pendingAudioPath = '';
     this.isStoppingRecording = false;
     this.activityMonitor = null;
+    this.recordingAudio = null;
+    this.audioSourceSelection = { microphone: true, system: false, ...workspace.audioSourceSelection };
+    this.audioSourcesReady = false;
     this.lastActivityUpdateAt = 0;
     this.micActivityThreshold = 0.02;
-    this.systemAudioStream = null;
-    this.systemAudioAnalyser = null;
-    this.nativeSystemAudioQueue = [];
-    this.nativeSystemAudioQueuedSamples = 0;
-    this.lastNativeSystemAudioAt = 0;
     this.nativeSystemAudioRunning = false;
     this.lastAsrPerfLogAt = 0;
     this.awaitingFinalTranscript = false;
@@ -50,6 +52,11 @@ class ExpressionTrainer {
     this.currentStage = 'live';
 
     this.initElements();
+    this.api.onLiveEmotion?.(result => {
+      if (!(this.isRecording || this.isStartingRecording) || this.isStoppingRecording) return;
+      if (this.isPaused && result.status !== 'paused') return;
+      this.renderLiveEmotion(result);
+    });
     this.bindEvents();
     this.bindNativeSystemAudioEvents();
     this.bindASRFinalEvents();
@@ -62,6 +69,12 @@ class ExpressionTrainer {
     this.btnPause = this.root.getElementById('btn-pause');
     this.btnResume = this.root.getElementById('btn-resume');
     this.btnStop = this.root.getElementById('btn-stop');
+    this.btnMicrophoneSource = this.root.getElementById('btn-microphone-source');
+    this.btnSystemSource = this.root.getElementById('btn-system-source');
+    this.audioSourceStatus = this.root.getElementById('audio-source-status');
+    this.liveEmotionStatus = this.root.getElementById('live-emotion-status');
+    this.liveEmotionCategories = this.root.getElementById('live-emotion-categories');
+    this.liveEmotionDetail = this.root.getElementById('live-emotion-detail');
     this.btnReport = this.root.getElementById('btn-report');
     this.btnSettings = this.root.getElementById('btn-settings');
     this.btnCloseReport = this.root.getElementById('btn-close-report');
@@ -131,6 +144,8 @@ class ExpressionTrainer {
     this.btnPause.addEventListener('click', () => this.pauseRecording());
     this.btnResume.addEventListener('click', () => this.resumeRecording());
     this.btnStop.addEventListener('click', () => this.stopRecording());
+    this.btnMicrophoneSource.addEventListener('click', () => this.toggleAudioSource('microphone'));
+    this.btnSystemSource.addEventListener('click', () => this.toggleAudioSource('system'));
     this.btnReport.addEventListener('click', () => this.generateReport());
     this.btnGenerateMinutes.addEventListener('click', () => this.generateMinutes());
     this.btnSettings.addEventListener('click', () => this.api.openSettings());
@@ -185,6 +200,7 @@ class ExpressionTrainer {
     this.btnGoMinutes.addEventListener('click', () => this.goToMinutes());
     this.btnCopyText.addEventListener('click', () => this.copyOriginalText());
     this.btnSaveText.addEventListener('click', () => this.saveOriginalText());
+    this.root.getElementById('btn-export-text').addEventListener('click', () => this.exportOriginalText());
     this.btnClear.addEventListener('click', () => this.clearAll());
     this.transcriptEditor.addEventListener('input', () => this.handleTranscriptEditorInput());
     this.root.getElementById('btn-adopt-final').addEventListener('click', async () => {
@@ -414,32 +430,39 @@ class ExpressionTrainer {
     const transcriptText = transcription?.text || '';
     this.audioAnalysisResult.innerHTML = `
       <div class="analysis-summary-grid">
-        <div><span>整体氛围</span><strong>${atmosphere.label || '相对平稳'}</strong></div>
-        <div><span>表达语气</span><strong>${atmosphere.tone || interpretation.stability || '未知'}</strong></div>
+        <div><span>文本氛围线索</span><strong>${transcriptText ? atmosphere.label || '相对平稳' : '需转写后查看'}</strong></div>
+        <div><span>声学变化</span><strong>${interpretation.stability || '未知'}</strong></div>
         <div><span>互动轮次</span><strong>${interaction.turnCount ?? '--'}</strong></div>
         <div><span>参与均衡度</span><strong>${interaction.participationBalance == null ? '--' : `${Math.round(interaction.participationBalance * 100)}%`}</strong></div>
       </div>
-      <h3>氛围与语气信号</h3>
+      <h3>基础声学与文本线索</h3>
       <p>音频能量${interpretation.energy || '未知'}，停顿负荷${interpretation.pauseLoad || '未知'}，能量变化${audio.energyChangeCount || 0} 次，音高变化代理 ${audio.pitchVariationHz || 0} Hz。</p>
-      <p>正向/担忧/挫败/兴奋信号：${atmosphere.sentiment?.agreement || 0} / ${atmosphere.sentiment?.concern || 0} / ${atmosphere.sentiment?.frustration || 0} / ${atmosphere.sentiment?.excitement || 0}。这些是提示信号，不是情绪定论。</p>
+      <p>文本关键词计数（正向/担忧/挫败/兴奋）：${atmosphere.sentiment?.agreement || 0} / ${atmosphere.sentiment?.concern || 0} / ${atmosphere.sentiment?.frustration || 0} / ${atmosphere.sentiment?.excitement || 0}。语音情绪分类在会议进行中的实时语气面板查看。</p>
       <p>非语言线索：笑声 ${atmosphere.nonVerbal?.laughterCount || 0} 次，叹气/叹词 ${atmosphere.nonVerbal?.sighCount || 0} 次，犹豫音 ${atmosphere.nonVerbal?.hesitationCount || 0} 次。</p>
       ${this.renderAudioTimeline(audio.timeline || [])}
       ${this.renderInteractionSummary(interaction, clarity)}
       ${transcriptText ? `<h3>本地转写</h3><p>${this.escapeHtml(transcriptText)}</p>` : ''}
-      <p class="analysis-note">${audio.openSmile?.enabled ? '已启用 openSMILE eGeMAPS 个人声学特征。' : `openSMILE 未启用：${audio.openSmile?.error || '未配置'}。`} ${interaction.speakerCount > 1 && interaction.speakers?.some(item => item.acoustics) ? '个人声学指标已按说话人时间片段计算，但重叠语音和错误分离仍需回听复核。' : '当前还没有可用的说话人时间片段；独立声学分析不需要配置说话人分离，多人个人语气请点击“转写并分析”。'}</p>
+      <p class="analysis-note">会后保留基础声学、互动和清晰度指标。${audio.openSmile?.enabled ? '已提取整体 openSMILE eGeMAPS 特征。' : ''}语气分类以会议中的实时反馈为准，混合声音不归因到个人。</p>
     `;
   }
 
   renderInteractionSummary(interaction, clarity) {
     const speakerRows = (interaction.speakers || []).map(item => {
-      const acoustics = item.acoustics;
-      const smile = item.openSmile;
-      const acousticText = acoustics
-        ? `${acoustics.toneSignal}<br>${acoustics.averagePitchHz || '--'} Hz / ${acoustics.averageRms || '--'}${smile ? `<br><small>eGeMAPS: ${smile.pitchMeanSemitone == null ? '--' : smile.pitchMeanSemitone} st</small>` : ''}`
-        : '无分离数据';
-      return `<tr><td>${this.escapeHtml(item.speaker)}</td><td>${item.turnCount}</td><td>${Math.round(item.participation * 100)}%</td><td>${item.wordsPerMinute} 字/分</td><td>${item.fillers}/${item.hedges}</td><td>${acousticText}</td></tr>`;
+      return `<tr><td>${this.escapeHtml(item.speaker)}</td><td>${item.turnCount}</td><td>${Math.round(item.participation * 100)}%</td><td>${item.wordsPerMinute} 字/分</td><td>${item.fillers}/${item.hedges}</td></tr>`;
     }).join('');
-    return `<h3>互动关系与表达清晰度</h3><p>说话人 ${interaction.speakerCount || 0} 位，打断/重叠 ${interaction.interruptions || 0} 次，重叠约 ${Number(interaction.overlapSeconds || 0).toFixed(1)} 秒，平均回应延迟 ${interaction.averageResponseDelaySeconds == null ? '未检测' : `${interaction.averageResponseDelaySeconds} 秒`}。</p><p>长句 ${clarity.longSentenceCount || 0} 个，填充词 ${clarity.fillerCount || 0} 个，犹豫词 ${clarity.hedgeCount || 0} 个，信息密度 ${Math.round((clarity.informationDensity || 0) * 100)}%。</p>${speakerRows ? `<table class="audio-speaker-table"><thead><tr><th>说话人</th><th>轮次</th><th>发言占比</th><th>语速代理</th><th>口癖/犹豫</th><th>个人声学</th></tr></thead><tbody>${speakerRows}</tbody></table>` : ''}`;
+    return `<h3>互动关系与表达清晰度</h3><p>说话人 ${interaction.speakerCount || 0} 位，打断/重叠 ${interaction.interruptions || 0} 次，重叠约 ${Number(interaction.overlapSeconds || 0).toFixed(1)} 秒，平均回应延迟 ${interaction.averageResponseDelaySeconds == null ? '未检测' : `${interaction.averageResponseDelaySeconds} 秒`}。</p><p>长句 ${clarity.longSentenceCount || 0} 个，填充词 ${clarity.fillerCount || 0} 个，犹豫词 ${clarity.hedgeCount || 0} 个，信息密度 ${Math.round((clarity.informationDensity || 0) * 100)}%。</p>${speakerRows ? `<table class="audio-speaker-table"><thead><tr><th>说话人</th><th>轮次</th><th>发言占比</th><th>语速代理</th><th>口癖/犹豫</th></tr></thead><tbody>${speakerRows}</tbody></table>` : ''}`;
+  }
+
+  renderLiveEmotion(result) {
+    if (!this.liveEmotionStatus) return;
+    this.liveEmotionStatus.dataset.status = result.status;
+    this.liveEmotionStatus.textContent = result.status === 'result' ? '近期语气' : result.message || '等待发言';
+    this.liveEmotionCategories.innerHTML = (result.candidates || []).map((item, index) =>
+      `<span class="emotion-category ${index ? 'candidate' : 'primary'}">${index ? '候选 · ' : ''}${this.escapeHtml(item.label)} <strong>${Math.round(item.score * 100)}%</strong></span>`
+    ).join('');
+    this.liveEmotionDetail.textContent = result.endSeconds != null
+      ? `${this.formatAudioTime(result.startSeconds)}–${this.formatAudioTime(result.endSeconds)} · 所选音源的语气倾向；分数不是情绪概率`
+      : '基于声音的语气倾向；多人同时发言时结果可能不明确';
   }
 
   renderAudioTimeline(timeline) {
@@ -456,7 +479,7 @@ class ExpressionTrainer {
         });
       });
     }, 0);
-    return `<h3>氛围变化时间线</h3><div class="audio-timeline">${items}</div><div class="audio-timeline-caption">每格约 30 秒，点击任意区间回听</div>`;
+    return `<h3>声学变化时间线</h3><div class="audio-timeline">${items}</div><div class="audio-timeline-caption">每格约 30 秒，点击任意区间回听</div>`;
   }
 
   escapeHtml(text) {
@@ -469,11 +492,7 @@ class ExpressionTrainer {
       const samples = new Float32Array(data.samples || []);
       if (!samples.length) return;
 
-      this.enqueueNativeSystemAudio(samples);
-      if (this.calculateRMS(samples) >= this.micActivityThreshold) {
-        this.lastNativeSystemAudioAt = Date.now();
-        this.updateMeetingActivityState({ hasInput: true, hasOutput: true });
-      }
+      (this.recordingAudio || this.activityMonitor?.router)?.enqueueNative(samples);
     });
 
     this.api.onNativeSystemAudioEvent((event) => {
@@ -485,9 +504,13 @@ class ExpressionTrainer {
         this.addFeedbackItem('Native 系统音频已启动', 'good');
       } else if (event.event === 'permission_required') {
         this.nativeSystemAudioRunning = false;
+        const router = this.recordingAudio || this.activityMonitor?.router;
+        if (router?.captures.system?.native) router.sourceEnded('system');
         this.addFeedbackItem('Native 系统音频需要屏幕与系统音频录制权限', 'filler');
       } else if (event.event === 'exit') {
         this.nativeSystemAudioRunning = false;
+        const router = this.recordingAudio || this.activityMonitor?.router;
+        if (router?.captures.system?.native) router.sourceEnded('system');
       }
     });
   }
@@ -501,51 +524,150 @@ class ExpressionTrainer {
         this.awaitingFinalTranscript = false;
         this.setSessionStatus(this.fullText.trim() ? '待确认' : '待开始');
         this.addFeedbackItem(result.finalTextError, 'filler');
-        if (this.fullText.trim()) this.showReviewModal();
+        if (this.fullText.trim() && !this.suppressReviewOnFinal) this.showReviewModal();
+        this.finishFinalTranscriptWaiter({
+          success: false,
+          error: result.finalTextError,
+          canSaveRealtime: Boolean(this.fullText.trim())
+        });
         return;
       }
 
       if (result?.finalText) {
-        if (result.recordingPath) this.pendingAudioPath = result.recordingPath;
-        this.speakerSegments = result.speakerSegments || [];
-        const duration = this.stats.duration || 0;
-        if (this.editorModified) {
-          this.finalCandidate = result;
-          this.root.getElementById('btn-adopt-final').classList.remove('hidden');
-          this.addFeedbackItem('最终稿已就绪，已保留你的编辑；可点击“采用最终稿”进行替换。', 'ai');
-        } else {
-          this.transcriptSource = 'final';
-          try {
-            await this.loadTranscriptText(result.finalText, { duration, requestFeedback: false, sessionGeneration });
-          } catch (error) {
-            this.addFeedbackItem(`最终稿已接收，但词库分析失败：${error.message}`, 'filler');
-          }
-        }
-        if (!this.isSessionCurrent(sessionGeneration)) return;
-        this.awaitingFinalTranscript = false;
-        this.setSessionStatus('待确认');
-        this.addFeedbackItem('Qwen3-ASR 最终稿已生成', 'good');
-        if (result.speakerCount > 1) {
-          this.addFeedbackItem(`已按音色区分 ${result.speakerCount} 位说话人`, 'good');
-        } else if (result.speakerError) {
-          this.addFeedbackItem('说话人区分失败，已保留普通最终稿', 'filler');
-        }
-        this.showReviewModal();
-        this.btnReport.classList.remove('hidden');
-        this.btnCopyText.classList.remove('hidden');
-        this.btnSaveText.classList.remove('hidden');
-        this.btnClear.classList.remove('hidden');
-        await this.refreshSavedArtifactFromFinal(sessionGeneration);
+        const final = await this.applyFinalTranscriptResult(result, { sessionGeneration });
+        this.finishFinalTranscriptWaiter(final);
       } else {
         this.awaitingFinalTranscript = false;
         this.setSessionStatus('最终稿为空，已保留实时稿');
+        this.finishFinalTranscriptWaiter({
+          success: false,
+          error: 'Qwen3-ASR 最终稿为空',
+          canSaveRealtime: Boolean(this.fullText.trim())
+        });
       }
     });
   }
 
+  createFinalTranscriptWaiter() {
+    if (this.finalTranscriptWaiter) return this.finalTranscriptWaiter.promise;
+    let resolve;
+    const promise = new Promise(done => { resolve = done; });
+    this.finalTranscriptWaiter = { promise, resolve };
+    return promise;
+  }
+
+  finishFinalTranscriptWaiter(result) {
+    this.finalTranscriptResult = result;
+    this.finalTranscriptWaiter?.resolve(result);
+    this.finalTranscriptWaiter = null;
+    this.suppressReviewOnFinal = false;
+  }
+
+  async waitForFinalTranscript() {
+    if (!this.awaitingFinalTranscript) {
+      return this.finalTranscriptResult || { success: true, source: this.transcriptSource };
+    }
+    return this.createFinalTranscriptWaiter();
+  }
+
+  async applyFinalTranscriptResult(result, options = {}) {
+    const sessionGeneration = options.sessionGeneration ?? this.activeSessionGeneration;
+    const finalText = String(result?.finalText || '').trim();
+    if (!finalText) {
+      this.awaitingFinalTranscript = false;
+      this.setSessionStatus('最终稿为空，已保留实时稿');
+      return { success: false, error: 'Qwen3-ASR 最终稿为空', canSaveRealtime: Boolean(this.fullText.trim()) };
+    }
+
+    if (result.recordingPath) this.pendingAudioPath = result.recordingPath;
+    this.speakerSegments = result.speakerSegments || [];
+    const duration = this.stats.duration || 0;
+    if (this.editorModified) {
+      this.finalCandidate = { ...result, finalText };
+      this.root.getElementById('btn-adopt-final').classList.remove('hidden');
+      this.addFeedbackItem('最终稿已就绪，已保留你的编辑；可点击“采用最终稿”进行替换。', 'ai');
+    } else {
+      this.transcriptSource = 'final';
+      try {
+        await this.loadTranscriptText(finalText, { duration, requestFeedback: false, sessionGeneration });
+      } catch (error) {
+        this.addFeedbackItem(`最终稿已接收，但词库分析失败：${error.message}`, 'filler');
+      }
+    }
+    if (!this.isSessionCurrent(sessionGeneration)) {
+      return { success: false, error: '会议状态已经变化', canSaveRealtime: Boolean(this.fullText.trim()) };
+    }
+    this.awaitingFinalTranscript = false;
+    this.setSessionStatus('待确认');
+    this.addFeedbackItem('Qwen3-ASR 最终稿已生成', 'good');
+    if (result.speakerCount > 1) {
+      this.addFeedbackItem(`已按音色区分 ${result.speakerCount} 位说话人`, 'good');
+    } else if (result.speakerError) {
+      this.addFeedbackItem('说话人区分失败，已保留普通最终稿', 'filler');
+    }
+    if (!this.suppressReviewOnFinal) this.showReviewModal();
+    this.btnReport.classList.remove('hidden');
+    this.btnCopyText.classList.remove('hidden');
+    this.btnSaveText.classList.remove('hidden');
+    this.btnClear.classList.remove('hidden');
+    await this.refreshSavedArtifactFromFinal(sessionGeneration);
+    return { success: true, source: this.transcriptSource };
+  }
+
+  async retryFinalTranscript() {
+    if (!this.pendingAudioPath) return { success: false, error: '没有可重试的录音文件' };
+    this.awaitingFinalTranscript = true;
+    this.finalTranscriptResult = null;
+    this.suppressReviewOnFinal = true;
+    try {
+      const result = await this.api.transcribeAudioFile({
+        filePath: this.pendingAudioPath,
+        jobId: `exit-${Date.now()}`
+      });
+      const transcription = result?.transcription;
+      if (!result?.success || !String(transcription?.text || '').trim()) {
+        const failure = {
+          success: false,
+          error: result?.error || '最终稿重试失败',
+          canSaveRealtime: Boolean(this.fullText.trim())
+        };
+        this.awaitingFinalTranscript = false;
+        this.finishFinalTranscriptWaiter(failure);
+        return failure;
+      }
+      const final = await this.applyFinalTranscriptResult({
+        finalText: transcription.text,
+        speakerSegments: transcription.speaker_segments || [],
+        speakerCount: transcription.speaker_count || 0,
+        recordingPath: this.pendingAudioPath
+      });
+      this.finishFinalTranscriptWaiter(final);
+      return final;
+    } catch (error) {
+      const failure = { success: false, error: error.message, canSaveRealtime: Boolean(this.fullText.trim()) };
+      this.awaitingFinalTranscript = false;
+      this.finishFinalTranscriptWaiter(failure);
+      return failure;
+    }
+  }
+
+  acceptRealtimeTranscriptForExit() {
+    if (!this.fullText.trim()) return { success: false, error: '没有可保存的实时稿' };
+    this.awaitingFinalTranscript = false;
+    const result = { success: true, source: 'realtime-fallback' };
+    this.finishFinalTranscriptWaiter(result);
+    return result;
+  }
+
   async loadSettingsAndMaybeAutoStart() {
     this.settings = await this.api.getSettings();
+    this.audioSourceSelection = this.workspace.audioSourceSelection
+      ? { ...this.workspace.audioSourceSelection }
+      : { microphone: true, system: this.settings?.meeting?.captureSystemAudio !== false };
+    this.audioSourcesReady = true;
+    this.renderAudioSourceControls();
     this.micActivityThreshold = Number(this.settings?.meeting?.micActivityThreshold || 0.02);
+    if (this.session.restored) return;
     if ([...this.workspace.sessions.items.keys()][0] !== this.session.id) return;
     if (this.settings?.meeting?.autoStartRecording) {
       setTimeout(() => {
@@ -561,27 +683,43 @@ class ExpressionTrainer {
     return this.settings;
   }
 
+  async restoreArchive(record) {
+    this.fullText = String(record.transcript || '');
+    this.transcriptEditor.value = this.fullText;
+    this.transcriptRevision = Number(record.metadata.transcriptRevision) || 0;
+    this.transcriptSource = record.metadata.transcriptSource || 'pasted';
+    this.editorModified = true;
+    this.stats = { fillers: 0, hedges: 0, vagueWords: 0, totalWords: 0, duration: 0, ...record.metadata.stats };
+    this.pendingAudioPath = record.audioPath || '';
+    this.speakerSegments = record.speakerSegments || [];
+    this.meetingSession = { sessionDir: record.sessionDir };
+    this.sentences = this.splitTranscript(this.fullText);
+    this.subtitleContainer.innerHTML = this.sentences.map(text => `<div class="subtitle-line">${this.highlightText(text)}</div>`).join('');
+    this.lastMinutes = record.minutes || '';
+    this.lastReport = record.report || '';
+    this.savedSnapshot = createSaveSnapshot(this.session, this);
+    this.savedPath = record.sessionDir;
+    this.savedArtifacts = { minutes: this.lastMinutes, report: this.lastReport };
+    this.minutesSnapshot = record.snapshots?.minutes || this.savedSnapshot;
+    this.reportSnapshot = record.snapshots?.report || this.savedSnapshot;
+    if (this.lastMinutes) { this.renderMinutes(this.lastMinutes); this.btnGenerateMinutes.textContent = '重新生成'; }
+    if (this.lastReport) this.renderReport(this.lastReport);
+    if (record.audioPath) {
+      this.setAudioFile({ filePath: record.audioPath, fileUrl: record.audioUrl, name: 'meeting.wav' });
+      if (record.audioAnalysis) this.renderAudioAnalysis(record.audioAnalysis);
+    }
+    this.timer.textContent = this.formatAudioTime(this.stats.duration);
+    this.updateStatsDisplay();
+    this.updateTextActionVisibility();
+    this.switchStage('transcript');
+    this.setSessionStatus('已有原文');
+  }
+
   autoSegmentEnabled() {
     return this.settings?.asr?.autoSegment !== false;
   }
 
   // ===== 录制控制 =====
-
-  calculateRMS(samples) {
-    let sum = 0;
-    for (let i = 0; i < samples.length; i++) {
-      sum += samples[i] * samples[i];
-    }
-    return Math.sqrt(sum / samples.length);
-  }
-
-  analyserIsActive(analyser) {
-    if (!analyser) return false;
-
-    const samples = new Float32Array(analyser.fftSize);
-    analyser.getFloatTimeDomainData(samples);
-    return this.calculateRMS(samples) >= this.micActivityThreshold;
-  }
 
   async updateMeetingActivityState({ hasInput, hasOutput }) {
     const now = Date.now();
@@ -612,57 +750,91 @@ class ExpressionTrainer {
     }
   }
 
-  async updateMeetingActivityFromSamples(samples, { hasOutput = false } = {}) {
-    const rms = this.calculateRMS(samples);
-    const nativeOutputActive = Date.now() - this.lastNativeSystemAudioAt < 1500;
-    await this.updateMeetingActivityState({
-      hasInput: rms >= this.micActivityThreshold || hasOutput || nativeOutputActive,
-      hasOutput: hasOutput || nativeOutputActive
+  renderAudioSourceControls() {
+    const router = this.recordingAudio || this.activityMonitor?.router;
+    for (const [kind, button, label] of [
+      ['microphone', this.btnMicrophoneSource, '麦克风输入'],
+      ['system', this.btnSystemSource, '系统输出']
+    ]) {
+      const selected = this.audioSourceSelection[kind];
+      const starting = router?.states[kind] === 'starting';
+      button.setAttribute('aria-pressed', String(selected));
+      button.textContent = `${label}：${starting ? '开启中…' : selected ? '开' : '关'}`;
+      button.disabled = !this.audioSourcesReady || this.isStartingRecording || this.isStoppingRecording;
+    }
+    const { microphone, system } = this.audioSourceSelection;
+    this.audioSourceStatus.textContent = microphone && system ? '录音来源：麦克风 + 系统输出'
+      : system ? '录音来源：仅系统输出（不采集麦克风）'
+      : microphone ? '录音来源：仅麦克风' : '两个来源均关闭，将录入静音';
+    if (router && Object.values(router.states).includes('starting')) this.audioSourceStatus.textContent += ' · 正在连接声音来源…';
+  }
+
+  async toggleAudioSource(kind) {
+    if (!this.audioSourcesReady || this.isStartingRecording || this.isStoppingRecording) return;
+    const enabled = !this.audioSourceSelection[kind];
+    this.audioSourceSelection[kind] = enabled;
+    this.workspace.audioSourceSelection = { ...this.audioSourceSelection };
+    this.renderAudioSourceControls();
+    const label = kind === 'microphone' ? '麦克风输入' : '系统输出';
+    const router = this.recordingAudio || this.activityMonitor?.router;
+    if (!enabled) this.api.reportRuntimeState?.(this.session.id, `${label}已关闭`);
+    else if (!router) this.api.reportRuntimeState?.(this.session.id, `${label}已选择`);
+    if (router) {
+      try { await router.setEnabled(kind, enabled); }
+      catch (_) { /* Current failures are reported by onSourceError, stale ones are ignored. */ }
+    }
+    this.renderAudioSourceControls();
+  }
+
+  createAudioRouter(contextLabel, onSamples) {
+    let previousStates = {};
+    return new RecordingAudioRouter({
+      audioContext: new AudioContext({ sampleRate: 16000 }),
+      requestMicrophone: () => this.requestMicStream(),
+      requestSystemAudio: async () => {
+        const stream = await this.requestSystemAudioStream(contextLabel, { force: true });
+        if (this.nativeSystemAudioRunning) return { native: true };
+        if (stream) return { stream };
+        throw new Error('未能开启系统输出，请检查屏幕与系统音频录制权限或系统音频设备');
+      },
+      stopSystemAudio: async () => {
+        await this.api.stopNativeSystemAudio();
+        this.nativeSystemAudioRunning = false;
+      },
+      onSamples,
+      onState: states => {
+        for (const [kind, state] of Object.entries(states)) {
+          if (state === 'on' && previousStates[kind] !== 'on') {
+            const label = kind === 'microphone' ? '麦克风输入' : '系统输出';
+            this.api.reportRuntimeState?.(this.session.id, `${label}已开启`);
+          }
+        }
+        previousStates = states;
+        this.renderAudioSourceControls();
+      },
+      onSourceError: (kind, error) => {
+        this.audioSourceSelection[kind] = false;
+        this.workspace.audioSourceSelection = { ...this.audioSourceSelection };
+        const label = kind === 'microphone' ? '麦克风输入' : '系统输出';
+        this.addFeedbackItem(`${label}不可用，已关闭：${error.message}`, 'filler');
+        this.api.reportRuntimeState?.(this.session.id, `${label}开启失败`);
+        this.renderAudioSourceControls();
+      }
     });
   }
 
-  enqueueNativeSystemAudio(samples) {
-    this.nativeSystemAudioQueue.push(samples);
-    this.nativeSystemAudioQueuedSamples += samples.length;
-
-    const maxQueuedSamples = 16000 * 30;
-    while (this.nativeSystemAudioQueuedSamples > maxQueuedSamples && this.nativeSystemAudioQueue.length > 0) {
-      const dropped = this.nativeSystemAudioQueue.shift();
-      this.nativeSystemAudioQueuedSamples -= dropped.length;
+  async connectAudioSources(router) {
+    const selection = { ...this.audioSourceSelection };
+    const results = await Promise.allSettled(Object.entries(selection).map(([kind, enabled]) => router.setEnabled(kind, enabled)));
+    if (Object.values(selection).some(Boolean) && !Object.values(router.enabled).some(Boolean)) {
+      throw new Error(results.find(result => result.status === 'rejected')?.reason?.message || '没有可用的声音来源');
     }
   }
 
-  consumeNativeSystemAudioSamples(length) {
-    const output = new Float32Array(length);
-    let offset = 0;
-
-    while (offset < length && this.nativeSystemAudioQueue.length > 0) {
-      const chunk = this.nativeSystemAudioQueue[0];
-      const take = Math.min(length - offset, chunk.length);
-      output.set(chunk.subarray(0, take), offset);
-      offset += take;
-
-      if (take === chunk.length) {
-        this.nativeSystemAudioQueue.shift();
-      } else {
-        this.nativeSystemAudioQueue[0] = chunk.subarray(take);
-      }
-      this.nativeSystemAudioQueuedSamples -= take;
-    }
-
-    return output;
-  }
-
-  mixNativeSystemAudio(samples) {
-    if (!this.nativeSystemAudioQueuedSamples) return samples;
-
-    const systemSamples = this.consumeNativeSystemAudioSamples(samples.length);
-    const mixed = new Float32Array(samples.length);
-    for (let i = 0; i < samples.length; i++) {
-      const value = (samples[i] * 0.75) + (systemSamples[i] * 0.75);
-      mixed[i] = Math.max(-1, Math.min(1, value));
-    }
-    return mixed;
+  updateSourceActivity({ microphoneRms, systemRms }) {
+    const hasOutput = systemRms >= this.micActivityThreshold;
+    this.updateMeetingActivityState({ hasInput: microphoneRms >= this.micActivityThreshold || hasOutput, hasOutput })
+      .catch(() => this.addFeedbackItem('声音活动检测失败，请手动控制录音', 'filler'));
   }
 
   buildAudioConstraints(deviceId) {
@@ -703,9 +875,9 @@ class ExpressionTrainer {
     }
   }
 
-  async requestSystemAudioStream(contextLabel) {
+  async requestSystemAudioStream(contextLabel, { force = false } = {}) {
     const settings = await this.getSettings();
-    if (!settings?.meeting?.captureSystemAudio) return null;
+    if (!force && !settings?.meeting?.captureSystemAudio) return null;
 
     const nativeResult = await this.api.startNativeSystemAudio();
     if (nativeResult?.success) {
@@ -769,52 +941,23 @@ class ExpressionTrainer {
     if (this.activityMonitor || this.isRecording) return;
 
     try {
-      const settings = await this.getSettings();
-      const stream = await this.requestMicStream();
-      const systemStream = settings?.meeting?.captureSystemAudio ? await this.requestSystemAudioStream('监听') : null;
-      const audioContext = new AudioContext({ sampleRate: 16000 });
-      const source = audioContext.createMediaStreamSource(stream);
-      const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 2048;
-      source.connect(analyser);
-
-      let systemAnalyser = null;
-      if (systemStream) {
-        const systemAudioOnlyStream = new MediaStream(systemStream.getAudioTracks());
-        const systemSource = audioContext.createMediaStreamSource(systemAudioOnlyStream);
-        systemAnalyser = audioContext.createAnalyser();
-        systemAnalyser.fftSize = 2048;
-        systemSource.connect(systemAnalyser);
-      }
-
-      const samples = new Float32Array(analyser.fftSize);
-      const interval = setInterval(() => {
-        analyser.getFloatTimeDomainData(samples);
-        const micActive = this.calculateRMS(samples) >= this.micActivityThreshold;
-        const systemActive = this.analyserIsActive(systemAnalyser);
-        this.updateMeetingActivityState({ hasInput: micActive || systemActive, hasOutput: systemActive });
-      }, 1000);
-
-      this.activityMonitor = { stream, systemStream, audioContext, source, analyser, systemAnalyser, interval };
+      const router = this.createAudioRouter('监听', (_samples, activity) => this.updateSourceActivity(activity));
+      this.activityMonitor = { router };
+      await this.connectAudioSources(router);
       this.setSessionStatus('监听会议');
-      this.addFeedbackItem('正在后台监听会议开始', 'ai');
+      this.addFeedbackItem('正在按所选声音来源监听会议开始', 'ai');
     } catch (err) {
+      await this.stopActivityMonitor();
       this.showError(`自动会议监听启动失败: ${err.message}`);
     }
   }
 
   async stopActivityMonitor() {
     if (!this.activityMonitor) return;
-
-    clearInterval(this.activityMonitor.interval);
-    this.activityMonitor.stream.getTracks().forEach(track => track.stop());
-    if (this.activityMonitor.systemStream) {
-      this.activityMonitor.systemStream.getTracks().forEach(track => track.stop());
-    }
-    await this.activityMonitor.audioContext.close();
+    const { router } = this.activityMonitor;
+    await router.close();
     this.activityMonitor = null;
-    await this.api.stopNativeSystemAudio();
-    this.nativeSystemAudioRunning = false;
+    this.renderAudioSourceControls();
     if (!this.isRecording) this.setSessionStatus(this.fullText.trim() ? '已有原文' : '待开始');
   }
 
@@ -825,14 +968,20 @@ class ExpressionTrainer {
       return this.workspace.create().startRecording(options);
     }
     this.isStartingRecording = true;
+    this.renderAudioSourceControls();
     try {
       if (!await this.workspace.beginCapture(this)) return;
       const sessionGeneration = ++this.sessionGeneration;
       this.activeSessionGeneration = sessionGeneration;
       this.awaitingFinalTranscript = false;
+      this.finalTranscriptResult = null;
+      this.finalTranscriptWaiter = null;
+      this.suppressReviewOnFinal = false;
       this.pendingFinalTranscriptGeneration = 0;
       await this.stopActivityMonitor();
       this.switchStage('live');
+      this.resetStats();
+      this.subtitleContainer.innerHTML = '';
 
       const initResult = await this.api.initASR();
       if (!initResult.success) {
@@ -851,58 +1000,23 @@ class ExpressionTrainer {
       }
 
       try {
-        const settings = await this.getSettings();
-        const stream = await this.requestMicStream();
-        this.mediaStream = stream;
-        this.systemAudioStream = settings?.meeting?.captureSystemAudio ? await this.requestSystemAudioStream('录音') : null;
-        this.audioContext = new AudioContext({ sampleRate: 16000 });
-        const source = this.audioContext.createMediaStreamSource(stream);
-        const micGain = this.audioContext.createGain();
-        micGain.gain.value = this.systemAudioStream ? 0.75 : 1;
-        this.audioProcessor = this.audioContext.createScriptProcessor(2048, 1, 1);
-        this.audioProcessor.onaudioprocess = async (e) => {
+        this.recordingAudio = this.createAudioRouter('录音', (samples, activity) => {
           if (!this.isRecording || this.isPaused || this.isStoppingRecording) return;
-          const samples = this.mixNativeSystemAudio(e.inputBuffer.getChannelData(0));
           const resultPromise = this.api.feedAudio(samples).then(result => {
             if (result && this.isSessionCurrent(sessionGeneration)) this.handleASRResult(result);
           }).catch(error => this.addFeedbackItem(`实时识别失败：${error.message}`, 'filler'));
           this.pendingAudioFeeds.add(resultPromise);
-          const systemActive = this.analyserIsActive(this.systemAudioAnalyser);
-          this.updateMeetingActivityFromSamples(samples, { hasOutput: systemActive }).catch(error => {
-            console.error('[MeetingActivity] 更新失败', error);
-          });
-          try { await resultPromise; }
-          finally { this.pendingAudioFeeds.delete(resultPromise); }
-        };
-
-        source.connect(micGain);
-        micGain.connect(this.audioProcessor);
-
-        if (this.systemAudioStream) {
-          const systemAudioOnlyStream = new MediaStream(this.systemAudioStream.getAudioTracks());
-          const systemSource = this.audioContext.createMediaStreamSource(systemAudioOnlyStream);
-          const systemGain = this.audioContext.createGain();
-          systemGain.gain.value = 0.75;
-          this.systemAudioAnalyser = this.audioContext.createAnalyser();
-          this.systemAudioAnalyser.fftSize = 2048;
-          systemSource.connect(systemGain);
-          systemSource.connect(this.systemAudioAnalyser);
-          systemGain.connect(this.audioProcessor);
-        }
-
-        this.audioProcessor.connect(this.audioContext.destination);
-        this.mediaStream = stream;
+          resultPromise.finally(() => this.pendingAudioFeeds.delete(resultPromise));
+          this.updateSourceActivity(activity);
+        });
+        await this.connectAudioSources(this.recordingAudio);
       } catch (err) {
-        if (this.audioProcessor) this.audioProcessor.disconnect();
-        if (this.audioContext) await this.audioContext.close();
-        this.mediaStream?.getTracks().forEach(track => track.stop());
-        this.systemAudioStream?.getTracks().forEach(track => track.stop());
-        await this.api.stopNativeSystemAudio();
+        await this.recordingAudio?.close();
+        this.recordingAudio = null;
         await this.api.stopASR();
-        this.showError(`麦克风访问失败: ${err.message}`);
+        this.showError(`声音来源启动失败: ${err.message}`);
         const settings = await this.getSettings();
         if (settings?.meeting?.autoDetectMeeting) await this.startActivityMonitor();
-        this.isStartingRecording = false;
         return;
       }
 
@@ -915,9 +1029,6 @@ class ExpressionTrainer {
       this.session.endedAt = null;
       this.pendingAudioPath = '';
       this.speakerSegments = [];
-      this.nativeSystemAudioQueue = [];
-      this.nativeSystemAudioQueuedSamples = 0;
-      this.lastNativeSystemAudioAt = 0;
       this.pauseStart = null;
       this.lastFeedbackText = '';
       this.transcriptEditor.readOnly = true;
@@ -926,14 +1037,14 @@ class ExpressionTrainer {
       this.fullText = '';
       this.sentences = [];
       this.meetingSession = null;
+      this.savedSnapshot = null;
+      this.savedArtifacts = { minutes: '', report: '' };
       this.lastReport = '';
       this.lastMinutes = '';
       this.minutesStatus.textContent = '';
       this.realtimePhraseBuffer = '';
       this.realtimeFlushChain = null;
       this.realtimePhraseLastAt = 0;
-      this.resetStats();
-      this.subtitleContainer.innerHTML = '';
       this.syncTranscriptEditor();
       this.reportBody.innerHTML = '<p class="empty-state">完成录制或粘贴原文后，可以在这里生成表达分析报告。</p>';
       this.minutesBody.innerHTML = '<p class="empty-state">完成录音或粘贴原文后，可以在这里生成正式会议纪要。</p>';
@@ -957,6 +1068,7 @@ class ExpressionTrainer {
       this.showError(`录音启动失败：${error.message}`);
     } finally {
       this.isStartingRecording = false;
+      this.renderAudioSourceControls();
       if (!this.isRecording) this.workspace.endCapture(this);
       this.workspace.render();
     }
@@ -964,6 +1076,8 @@ class ExpressionTrainer {
 
   pauseRecording() {
     this.isPaused = true;
+    this.renderLiveEmotion({ status: 'paused', message: '已暂停语气反馈' });
+    this.api.pauseLiveEmotion?.(true)?.catch(error => this.addFeedbackItem(`语气反馈暂停失败：${error.message}`, 'filler'));
     this.pauseStart = Date.now();
     this.btnPause.classList.add('hidden');
     this.btnResume.classList.remove('hidden');
@@ -973,6 +1087,8 @@ class ExpressionTrainer {
 
   resumeRecording() {
     this.isPaused = false;
+    this.renderLiveEmotion({ status: 'collecting', message: '等待约 6 秒有效声音' });
+    this.api.pauseLiveEmotion?.(false)?.catch(error => this.addFeedbackItem(`语气反馈恢复失败：${error.message}`, 'filler'));
     this.pausedTime += Date.now() - this.pauseStart;
     this.pauseStart = null;
     this.btnResume.classList.add('hidden');
@@ -984,19 +1100,16 @@ class ExpressionTrainer {
   async stopRecording(options = {}) {
     if (!this.isRecording || this.isStoppingRecording) return;
     this.isStoppingRecording = true;
+    this.renderLiveEmotion({ status: 'stopped', message: '录音已结束' });
+    this.renderAudioSourceControls();
+    this.suppressReviewOnFinal = Boolean(options.suppressReview);
+    if (options.suppressReview) this.reviewModal.classList.add('hidden');
     this.workspace.render();
     try {
       const sessionGeneration = this.activeSessionGeneration;
 
-      if (this.audioProcessor) { this.audioProcessor.disconnect(); this.audioProcessor = null; }
-      if (this.audioContext) { this.audioContext.close(); this.audioContext = null; }
-      if (this.mediaStream) { this.mediaStream.getTracks().forEach(t => t.stop()); this.mediaStream = null; }
-      if (this.systemAudioStream) { this.systemAudioStream.getTracks().forEach(t => t.stop()); this.systemAudioStream = null; }
-      this.systemAudioAnalyser = null;
-      await this.api.stopNativeSystemAudio();
-      this.nativeSystemAudioRunning = false;
-      this.nativeSystemAudioQueue = [];
-      this.nativeSystemAudioQueuedSamples = 0;
+      await this.recordingAudio?.close();
+      this.recordingAudio = null;
       await Promise.allSettled([...this.pendingAudioFeeds]);
       await this.flushRealtimePhraseBuffer();
       const stopResult = await this.api.stopASR();
@@ -1017,11 +1130,18 @@ class ExpressionTrainer {
 
       if (stopResult?.finalTextError) {
         this.addFeedbackItem(stopResult.finalTextError, 'filler');
+        this.finalTranscriptResult = {
+          success: false,
+          error: stopResult.finalTextError,
+          canSaveRealtime: Boolean(this.fullText.trim())
+        };
       }
 
       if (stopResult?.finalTextPending) {
         this.awaitingFinalTranscript = true;
+        this.finalTranscriptResult = null;
         this.pendingFinalTranscriptGeneration = sessionGeneration;
+        this.createFinalTranscriptWaiter();
         this.setSessionStatus('最终稿生成中');
         this.addFeedbackItem('Qwen3-ASR 正在后台生成最终稿', 'ai');
       }
@@ -1032,6 +1152,7 @@ class ExpressionTrainer {
       } else if (stopResult?.finalText) {
         this.transcriptSource = 'final';
         await this.loadTranscriptText(stopResult.finalText, { duration, requestFeedback: false, sessionGeneration });
+        this.finalTranscriptResult = { success: true, source: 'final' };
         if (stopResult.finalTextSource === 'qwen3-asr') {
           this.addFeedbackItem('Qwen3-ASR 最终稿已生成', 'good');
           if (stopResult.speakerCount > 1) {
@@ -1057,7 +1178,7 @@ class ExpressionTrainer {
         this.syncTranscriptEditor();
         if (!stopResult?.finalTextPending) {
           this.setSessionStatus('待确认');
-          this.showReviewModal();
+          if (!options.suppressReview) this.showReviewModal();
         }
       } else if (!this.awaitingFinalTranscript) {
         this.setSessionStatus('待开始');
@@ -1069,12 +1190,18 @@ class ExpressionTrainer {
       if (settings?.meeting?.autoDetectMeeting) {
         await this.startActivityMonitor();
       }
+      return { success: true };
     } catch (error) {
       this.setSessionStatus('结束录音失败');
       this.addFeedbackItem(error.message, 'filler');
+      const failure = { success: false, error: error.message, canSaveRealtime: Boolean(this.fullText.trim()) };
+      this.awaitingFinalTranscript = false;
+      this.finishFinalTranscriptWaiter(failure);
+      return failure;
     } finally {
       this.isRecording = false;
       this.isStoppingRecording = false;
+      this.renderAudioSourceControls();
       clearInterval(this.timerInterval);
       this.transcriptEditor.readOnly = false;
       this.btnClear.disabled = false;
@@ -1091,7 +1218,7 @@ class ExpressionTrainer {
 
   async confirmSaveTranscript() {
     const snapshot = createSaveSnapshot(this.session, this);
-    const result = await this.saveMeetingTranscriptArtifact(snapshot);
+    const result = await this.saveMeetingTranscriptArtifact(snapshot, { force: true });
     if (result?.success) this.reviewModal.classList.add('hidden');
   }
 
@@ -1111,7 +1238,6 @@ class ExpressionTrainer {
 
   discardCurrentRecording() {
     this.reviewModal.classList.add('hidden');
-    this.awaitingFinalTranscript = false;
     this.clearAll();
     this.addFeedbackItem('录音已丢弃', 'filler');
   }
@@ -1243,16 +1369,16 @@ class ExpressionTrainer {
   }
 
   highlightText(text) {
-    let result = text;
     const vagueWords = ['开心','难过','害怕','生气','不舒服','很好','很多','很快','很大','很小','好看','不好','喜欢','讨厌','觉得','想想'];
-    vagueWords.forEach(w => {
-      result = result.replace(new RegExp(w, 'g'), `<span class="vague">${w}</span>`);
-    });
-    const fillerPatterns = /(嗯|啊|呃|额|那个|就是|然后|这个|对吧|是吧|反正|基本上)/g;
-    result = result.replace(fillerPatterns, '<span class="filler">$1</span>');
-    const hedgePatterns = /(可能|也许|大概|应该|我觉得|好像|似乎|或许|不一定|差不多|感觉)/g;
-    result = result.replace(hedgePatterns, '<span class="hedge">$1</span>');
-    return result;
+    const categories = new Map([
+      ...vagueWords.map(word => [word, 'vague']),
+      ...['嗯','啊','呃','额','那个','就是','然后','这个','对吧','是吧','反正','基本上'].map(word => [word, 'filler']),
+      ...['可能','也许','大概','应该','我觉得','好像','似乎','或许','不一定','差不多','感觉'].map(word => [word, 'hedge'])
+    ]);
+    const pattern = new RegExp(`(${[...categories.keys()].sort((a, b) => b.length - a.length).join('|')})`, 'g');
+    return String(text ?? '').split(pattern).map(part => categories.has(part)
+      ? `<span class="${categories.get(part)}">${this.escapeHtml(part)}</span>`
+      : this.escapeHtml(part)).join('');
   }
 
   // ===== 分析 =====
@@ -1384,6 +1510,14 @@ class ExpressionTrainer {
   // ===== 报告 =====
 
   async generateReport(options = {}) {
+    if (this.reportPromise) return this.reportPromise;
+    const pending = this.generateReportContent(options);
+    this.reportPromise = pending;
+    try { return await pending; }
+    finally { if (this.reportPromise === pending) this.reportPromise = null; }
+  }
+
+  async generateReportContent(options = {}) {
     const generation = this.activeSessionGeneration;
     const snapshot = options.snapshot || createSaveSnapshot(this.session, this);
     if (!snapshot.transcript.trim()) {
@@ -1413,6 +1547,14 @@ class ExpressionTrainer {
   }
 
   async generateMinutes() {
+    if (this.minutesPromise) return this.minutesPromise;
+    const pending = this.generateMinutesContent();
+    this.minutesPromise = pending;
+    try { return await pending; }
+    finally { if (this.minutesPromise === pending) this.minutesPromise = null; }
+  }
+
+  async generateMinutesContent() {
     const generation = this.activeSessionGeneration;
     const snapshot = createSaveSnapshot(this.session, this);
     if (!snapshot.transcript.trim()) {
@@ -1466,17 +1608,7 @@ class ExpressionTrainer {
   }
 
   renderReport(report) {
-    let html = report
-      .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-      .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      .replace(/`([^`]+)`/g, '<code>$1</code>')
-      .replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
-      .replace(/\|(.+)\|/g, (match) => {
-        // 简单表格支持
-        return match;
-      })
-      .replace(/\n/g, '<br>');
+    const html = this.renderMarkdown(report);
 
     this.reportBody.innerHTML = `
       <div style="text-align:right;margin-bottom:12px;">
@@ -1500,10 +1632,10 @@ class ExpressionTrainer {
     return `<p class="analysis-note">《${this.escapeHtml(snapshot.title)}》 · ${this.escapeHtml(new Date(snapshot.startedAt).toLocaleString('zh-CN'))} · 原文版本 ${snapshot.transcriptRevision}</p>`;
   }
 
-  async saveMeetingTranscriptArtifact(snapshot = createSaveSnapshot(this.session, this)) {
+  async saveMeetingTranscriptArtifact(snapshot = createSaveSnapshot(this.session, this), options = {}) {
     if (this.savePromise) return this.savePromise;
     const generation = this.activeSessionGeneration;
-    const pending = this.persistTranscriptSnapshot(snapshot);
+    const pending = this.persistTranscriptSnapshot(snapshot, options);
     this.savePromise = pending;
     this.workspace.render();
     try {
@@ -1528,13 +1660,18 @@ class ExpressionTrainer {
     }
   }
 
-  async persistTranscriptSnapshot(snapshot) {
+  async persistTranscriptSnapshot(snapshot, options = {}) {
     const settings = await this.getSettings();
-    if (!settings?.meeting?.autoSaveArtifacts) throw new Error('设置未开启保存原文');
-    if (!snapshot.transcript.trim()) throw new Error('这场会议没有可保存的原文');
-    const analysis = await this.api.analyzeText(snapshot.transcript);
-    if (analysis) snapshot.stats = { ...snapshot.stats, fillers: analysis.fillers.length,
-      hedges: analysis.hedges.length, vagueWords: analysis.vagueWords.length, totalWords: analysis.totalWords };
+    if (!options.force && !settings?.meeting?.autoSaveArtifacts) throw new Error('设置未开启保存原文');
+    const hasTranscript = Boolean(snapshot.transcript.trim());
+    if (!hasTranscript && !(options.allowAudioOnly && (snapshot.audioPath || snapshot.minutes || snapshot.report))) {
+      throw new Error('这场会议没有可保存的原文');
+    }
+    if (hasTranscript) {
+      const analysis = await this.api.analyzeText(snapshot.transcript);
+      if (analysis) snapshot.stats = { ...snapshot.stats, fillers: analysis.fillers.length,
+        hedges: analysis.hedges.length, vagueWords: analysis.vagueWords.length, totalWords: analysis.totalWords };
+    }
     const result = await this.api.saveMeetingTranscript(snapshot);
     if (!result.success) throw new Error(result.error || '保存原文失败');
     return result;
@@ -1568,16 +1705,63 @@ class ExpressionTrainer {
     if (!sessionDir) return;
     const result = await this.api.saveMeetingReport({ ...snapshot, sessionDir, report });
     if (!result.success) throw new Error(result.error || '保存报告失败');
+    this.savedArtifacts.report = report;
     this.addFeedbackItem(`《${snapshot.title}》报告已保存：${result.reportPath}`, 'good');
+    return result;
   }
 
-  async saveMeetingMinutesArtifact(minutes, snapshot, sessionDir) {
+  async saveMeetingMinutesArtifact(minutes, snapshot, sessionDir, options = {}) {
     if (!sessionDir) return;
     const settings = await this.getSettings();
-    if (!settings?.meeting?.autoSaveArtifacts) return;
+    if (!options.force && !settings?.meeting?.autoSaveArtifacts) return;
     const result = await this.api.saveMeetingMinutes({ ...snapshot, sessionDir, minutes });
     if (!result.success) throw new Error(result.error || '保存纪要失败');
+    this.savedArtifacts.minutes = minutes;
     this.addFeedbackItem(`《${snapshot.title}》纪要已保存：${result.minutesPath}`, 'good');
+    return result;
+  }
+
+  async saveAllExistingArtifactsForExit(snapshot = createSaveSnapshot(this.session, this)) {
+    if (this.savePromise) await this.savePromise;
+    const transcriptResult = await this.saveMeetingTranscriptArtifact(snapshot, { allowAudioOnly: true, force: true });
+    if (!transcriptResult?.success) {
+      return { success: false, error: transcriptResult?.error || '原文保存失败' };
+    }
+
+    const sessionDir = transcriptResult.sessionDir;
+    try {
+      if (snapshot.minutes) {
+        await this.saveMeetingMinutesArtifact(snapshot.minutes, this.minutesSnapshot || snapshot, sessionDir, { force: true });
+      }
+      if (snapshot.report) {
+        await this.saveMeetingReportArtifact(snapshot.report, this.reportSnapshot || snapshot, sessionDir);
+      }
+      return { success: true, sessionDir };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  async prepareForExit() {
+    while (this.isStartingRecording) await new Promise(resolve => setTimeout(resolve, 25));
+    if (this.isRecording || this.isStoppingRecording) {
+      if (this.isRecording) {
+        const stopped = await this.stopRecording({ suppressReview: true });
+        if (stopped?.success === false) return { success: false, stage: 'stopping', ...stopped };
+      }
+      while (this.isStoppingRecording) {
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+    }
+
+    await Promise.all([this.reportPromise, this.minutesPromise, this.finalArtifactRefreshPromise].filter(Boolean));
+    const final = await this.waitForFinalTranscript();
+    if (!final.success) return { success: false, stage: 'final-transcript', ...final };
+    const snapshot = createSaveSnapshot(this.session, this);
+    const saved = await this.saveAllExistingArtifactsForExit(snapshot);
+    return saved.success
+      ? { success: true, sessionDir: saved.sessionDir }
+      : { success: false, stage: 'saving', ...saved };
   }
 
   async exportSnapshot(snapshot, kind, body) {
@@ -1641,13 +1825,25 @@ class ExpressionTrainer {
   async saveOriginalText() {
     const snapshot = createSaveSnapshot(this.session, this);
     if (!snapshot.transcript.trim()) return;
+    await this.saveMeetingTranscriptArtifact(snapshot, { force: true });
+  }
+
+  async exportOriginalText() {
+    const snapshot = createSaveSnapshot(this.session, this);
+    if (!snapshot.transcript.trim()) return;
     await this.exportSnapshot(snapshot, '会议原文', snapshot.transcript);
   }
 
   clearAll() {
     if (this.isRecording || this.isStoppingRecording && !this.session.endedAt) return;
+    if (this.awaitingFinalTranscript) {
+      this.finishFinalTranscriptWaiter({ success: false, error: '最终稿已取消', canSaveRealtime: false });
+    }
     this.activeSessionGeneration = ++this.sessionGeneration;
     this.awaitingFinalTranscript = false;
+    this.finalTranscriptResult = null;
+    this.finalTranscriptWaiter = null;
+    this.suppressReviewOnFinal = false;
     this.pendingFinalTranscriptGeneration = 0;
     this.transcriptRevision++;
     this.finalCandidate = null;
@@ -1658,6 +1854,7 @@ class ExpressionTrainer {
     this.lastReport = '';
     this.lastMinutes = '';
     this.minutesStatus.textContent = '';
+    this.savedArtifacts = { minutes: '', report: '' };
     this.meetingSession = null;
     this.savedSnapshot = null;
     this.savedPath = '';

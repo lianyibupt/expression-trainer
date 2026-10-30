@@ -32,7 +32,7 @@ test('meeting session async results are guarded against stale sessions', () => {
   assert.match(app, /this\.pendingFinalTranscriptGeneration !== this\.activeSessionGeneration/);
   assert.doesNotMatch(app, /上一场会议整理中，等待完成/);
   assert.match(app, /createSaveSnapshot\(this\.session, this\)/);
-  assert.match(app, /if \(!this\.isSessionCurrent\(sessionGeneration\)\) return;/);
+  assert.match(app, /if \(!this\.isSessionCurrent\(sessionGeneration\)\)\s*(?:return(?:\s+false)?;|\{\s*return\s*\{\s*success:\s*false,)/);
 });
 
 test('meeting tabs provide close, reopen and recording-owner controls', () => {

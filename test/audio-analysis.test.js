@@ -70,7 +70,7 @@ test('buildConversationAnalysis combines sentiment, clarity, participation, and 
   assert.equal(result.clarity.hedgeCount, 1);
 });
 
-test('analyzeAudioFile computes per-speaker acoustic stats from diarized segments', () => {
+test('analysis keeps participation but no longer computes per-speaker acoustics or emotions', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'expression-speaker-analysis-'));
   const filePath = path.join(dir, 'meeting.wav');
   writeTestWav(filePath);
@@ -80,8 +80,16 @@ test('analyzeAudioFile computes per-speaker acoustic stats from diarized segment
     { speaker: '说话人 2', start: 1.2, end: 1.8, text: '我担心风险。' }
   ]);
 
-  assert.equal(analysis.speakerAcoustics.speakers.length, 2);
-  assert.equal(analysis.speakerAcoustics.segmentDetails.length, 2);
-  assert.ok(analysis.speakerAcoustics.speakers[0].averageRms > 0);
-  assert.ok(Number.isFinite(analysis.speakerAcoustics.speakers[0].averagePitchHz));
+  assert.equal(analysis.speakerAcoustics, undefined);
+  const conversation = buildConversationAnalysis(analysis, { speaker_segments: [
+    { speaker: 'A', start: 0, end: 1, text: '支持。' },
+    { speaker: 'B', start: 1, end: 2, text: '担心。' }
+  ] });
+  assert.equal(conversation.interaction.speakers.length, 2);
+  for (const speaker of conversation.interaction.speakers) {
+    assert.equal(speaker.sentiment, undefined);
+    assert.equal(speaker.dominantSignals, undefined);
+    assert.equal(speaker.acoustics, undefined);
+    assert.equal(speaker.participation, 0.5);
+  }
 });

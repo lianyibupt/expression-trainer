@@ -50,15 +50,43 @@ test('save snapshot retains identity, edited text, and speaker data after change
   const trainer = { fullText: 'live', transcriptEditor: { value: 'edited A' },
     stats: { totalWords: 1 }, pendingAudioPath: '/a.wav',
     speakerSegments: [{ speaker: 'A', start: 0 }], transcriptRevision: 2,
-    transcriptSource: 'edited' };
+    transcriptSource: 'edited', lastMinutes: '现有纪要', lastReport: '现有报告' };
   const snapshot = createSaveSnapshot(a, trainer);
   a.title = 'renamed';
   trainer.transcriptEditor.value = 'changed';
   trainer.stats.totalWords = 999;
   trainer.speakerSegments[0].speaker = 'changed';
+  trainer.lastMinutes = 'changed minutes';
+  trainer.lastReport = 'changed report';
   assert.equal(snapshot.sessionId, 'a');
   assert.equal(snapshot.title, 'Planning');
   assert.equal(snapshot.transcript, 'edited A');
   assert.equal(snapshot.speakerSegments[0].speaker, 'A');
   assert.equal(snapshot.stats.totalWords, 1);
+  assert.equal(snapshot.minutes, '现有纪要');
+  assert.equal(snapshot.report, '现有报告');
+  assert.notEqual(snapshot.speakerSegments, trainer.speakerSegments);
+});
+
+test('save snapshot preserves an audio-only recording without requiring transcript text', () => {
+  const sessions = new MeetingSessions();
+  const session = sessions.create('audio-only');
+  const snapshot = createSaveSnapshot(session, {
+    transcriptEditor: { value: '' }, transcriptRevision: 0, transcriptSource: 'realtime',
+    stats: {}, pendingAudioPath: '/recordings/audio-only.wav', speakerSegments: [],
+    lastMinutes: '', lastReport: ''
+  });
+  assert.equal(snapshot.transcript, '');
+  assert.equal(snapshot.audioPath, '/recordings/audio-only.wav');
+});
+
+test('emotion events and pause requests are scoped to the intended meeting', () => {
+  const callbacks = [], events = [], pauses = [];
+  const api = createSessionAPI({ onLiveEmotion: cb => callbacks.push(cb),
+    pauseLiveEmotion: (id, paused) => pauses.push({ id, paused }) }, 'a');
+  api.onLiveEmotion(r => events.push(r));
+  callbacks[0]({ sessionId: 'b' }); callbacks[0]({ sessionId: 'a', status: 'result' });
+  api.pauseLiveEmotion(true);
+  assert.equal(events.length, 1);
+  assert.deepEqual(pauses, [{ id: 'a', paused: true }]);
 });

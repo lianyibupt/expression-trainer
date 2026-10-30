@@ -1,6 +1,7 @@
 node_modules/
 .worktrees/
 .venv-qwen3-asr/
+.venv-emotion/
 .pip-cache/
 __pycache__/
 models/

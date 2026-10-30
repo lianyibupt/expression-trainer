@@ -53,6 +53,10 @@
       initASR: () => api.initASR(sessionId),
       feedAudio: samples => api.feedAudio(samples, sessionId),
       stopASR: () => api.stopASR(sessionId),
+      pauseLiveEmotion: paused => api.pauseLiveEmotion?.(sessionId, paused),
+      onLiveEmotion: callback => api.onLiveEmotion?.(result => {
+        if (result?.sessionId === sessionId) return callback(result);
+      }),
       onASRFinalResult: callback => api.onASRFinalResult(result => {
         if (result?.sessionId === sessionId) return callback(result);
       }),
@@ -68,6 +72,7 @@
   function createSaveSnapshot(session, trainer) {
     return {
       sessionId: session.id,
+      archiveId: session.archiveId,
       title: session.title,
       startedAt: session.startedAt || session.createdAt,
       endedAt: session.endedAt,
@@ -76,7 +81,9 @@
       transcriptSource: trainer.transcriptSource,
       stats: { ...trainer.stats },
       audioPath: trainer.pendingAudioPath,
-      speakerSegments: trainer.speakerSegments.map(segment => ({ ...segment }))
+      speakerSegments: trainer.speakerSegments.map(segment => ({ ...segment })),
+      minutes: trainer.lastMinutes || '',
+      report: trainer.lastReport || ''
     };
   }
 

@@ -7,7 +7,7 @@
     },
     "deepseek": {
       "apiKey": "your-api-key-here",
-      "model": "deepseek-chat"
+      "model": "deepseek-flash"
     },
     "ollama": {
       "ollamaUrl": "http://localhost:11434",
