@@ -34,10 +34,10 @@ const PROVIDER_CONFIG = {
 };
 
 const ASR_MODEL_HINTS = {
-  'paraformer-qwen3-final': '录制中使用 Paraformer 保持低延迟字幕；结束录音后用 Python qwen-asr 调用 Qwen3-ASR 重新生成更准确的最终逐字稿。',
-  'sensevoice-int8': '下载 sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17-int8 到项目 models/ 目录。结束录音后生成最终逐字稿。',
-  'paraformer-streaming': '使用项目 models/sherpa-onnx-streaming-paraformer-bilingual-zh-en，录音时实时出字幕。',
-  'qwen3-asr-python': '使用 Python qwen-asr 包调用 Qwen3-ASR，结束录音后生成高质量最终逐字稿。留空模型路径时使用 Qwen/Qwen3-ASR-1.7B。',
+  'paraformer-qwen3-final': '录制中显示实时字幕，停止后生成更准确的最终逐字稿。请先在“资源下载与检查”中准备实时字幕、最终转写环境和 Qwen3 模型。',
+  'sensevoice-int8': '请先在“资源下载与检查”中准备 SenseVoice 模型，结束录音后生成最终逐字稿。',
+  'paraformer-streaming': '录音时显示实时字幕。请先在“资源下载与检查”中准备实时字幕模型。',
+  'qwen3-asr-python': '结束录音后生成高质量最终逐字稿。留空模型路径时，安装版使用已经下载的 Qwen3 模型。',
   'sensevoice-custom': '只支持 sherpa-onnx 兼容导出的 SenseVoice 目录；普通 FunASR/Shandianshuo 导出可能无法直接加载。'
 };
 
@@ -98,6 +98,7 @@ class SettingsPage {
   }
 
   bindEvents() {
+    document.getElementById('btn-resources')?.addEventListener('click', () => window.api.openResources());
     this.providerSelect.addEventListener('change', () => this.onProviderChange());
     this.asrModelPresetSelect.addEventListener('change', () => this.onASRModelChange());
     this.btnRefreshAudioDevices.addEventListener('click', () => this.loadAudioDevices({ requestPermission: true }));

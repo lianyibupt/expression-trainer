@@ -1,0 +1,7 @@
+Generated with the built-in image_gen tool on 2026-10-30.
+
+Use case: logo-brand. Asset type: production macOS application icon for a Chinese desktop application named 智能会议和表达训练 (intelligent meetings and expression training). Create one polished square app icon, ideally 1024 by 1024 pixels. A single generous macOS rounded-square tile centered with transparent area outside its rounded corners. Inside, an original unified white speech-bubble mark containing three or four bold audio waveform bars; the silhouette subtly suggests an open meeting notebook, communicating listening, meeting notes and clear spoken expression. Simple, confident, instantly legible at small Dock sizes. Premium native macOS app aesthetic with gentle dimensional depth, restrained blue/teal gradient tile, crisp edges and strong contrast, balanced central composition. The mark should be visually coherent rather than several separate tiny symbols. No text, letters, numbers, brand logos, watermark, mockup, surrounding desktop, extra icons or decorative sparkles. This is the actual icon asset, not a presentation of it. Preserve transparent outer corners.
+
+Source PNG: app-icon-v1.png (1254 x 1254, with alpha).
+macOS icon: app-icon-v1.icns (16 through 1024 pixel representations, including Retina representations).
+Verification: ICNS header length checked; native macOS sips successfully decoded the ICNS to PNG.

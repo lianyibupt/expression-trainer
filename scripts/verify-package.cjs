@@ -1,0 +1,24 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { execFileSync } = require('node:child_process');
+const asar = require('@electron/asar');
+
+const app = path.resolve(process.argv[2] || 'dist/mac-arm64/智能会议和表达训练.app');
+const resources = path.join(app, 'Contents', 'Resources');
+const archive = path.join(resources, 'app.asar');
+const entries = asar.listPackage(archive);
+const forbidden = /(?:^|\/)(?:settings\.json|settings\.example\.json|custom-prompt\.json|models|\.venv[^/]*|\.pip-cache|minute-artifacts|meeting-artifacts|\.git|\.env(?:\.[^/]*)?|test|tests)(?:\/|$)/;
+for (const entry of entries) assert.equal(forbidden.test(entry), false, `Unexpected private/development file: ${entry}`);
+for (const filename of ['main.js', 'lib/resource-manager.js', 'lib/resource-catalog.json', 'lib/runtime-requirements.json', 'src/resources.html', 'THIRD_PARTY_NOTICES.md']) assert(entries.includes('/' + filename), `Missing ${filename}`);
+const pkg = JSON.parse(asar.extractFile(archive, 'package.json'));
+assert.equal(pkg.productName, '智能会议和表达训练');
+for (const filename of ['bin/system-audio-probe', 'workers/qwen3_asr_worker.py', 'workers/emotion_worker.py', 'workers/opensmile_worker.py']) assert(fs.existsSync(path.join(resources, filename)), `Missing external resource ${filename}`);
+const unpacked = path.join(resources, 'app.asar.unpacked', 'node_modules', 'sherpa-onnx-darwin-arm64');
+assert(fs.existsSync(unpacked), 'Native ASR package must be unpacked');
+const plist = JSON.parse(execFileSync('/usr/bin/plutil', ['-convert', 'json', '-o', '-', path.join(app, 'Contents', 'Info.plist')], { encoding: 'utf8' }));
+assert.equal(plist.CFBundleDisplayName, '智能会议和表达训练');
+assert(plist.NSMicrophoneUsageDescription);
+assert(plist.NSScreenCaptureUsageDescription);
+execFileSync('/usr/bin/codesign', ['--verify', '--deep', '--strict', app]);
+console.log(JSON.stringify({ app, files: entries.length, name: plist.CFBundleDisplayName, minMacOS: plist.LSMinimumSystemVersion, privacyExclusions: 'passed', sidecars: 'passed', signatureIntegrity: 'passed (ad-hoc, not notarized)' }, null, 2));

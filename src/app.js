@@ -1553,9 +1553,14 @@ class ExpressionTrainer {
     const selected = this.localCoachingFilter.value || '';
     const analysis = this.localAnalysis;
     const categories = analysis?.categories || ExpressionAnalysis.categories.map(item => ({ ...item, count: 0 }));
-    this.localCoachingFilter.innerHTML = '<option value="">全部类别</option>' + categories.map(item =>
-      `<option value="${item.id}">${this.escapeHtml(item.label)}（${item.count}）</option>`).join('');
-    this.localCoachingFilter.value = selected;
+    // Native select popups redraw when their options change. Keep category nodes
+    // and labels stable during live updates; changing counts stay in the summary.
+    if (!this.localCoachingFilterInitialized) {
+      this.localCoachingFilter.innerHTML = '<option value="">全部类别</option>' + categories.map(item =>
+        `<option value="${item.id}">${this.escapeHtml(item.label)}</option>`).join('');
+      this.localCoachingFilter.value = selected;
+      this.localCoachingFilterInitialized = true;
+    }
     const findings = analysis?.findings || [];
     // Give every dimension room, instead of allowing repeated fillers to bury useful action prompts.
     const chronological = [...findings].sort((a, b) => a.start - b.start || a.end - b.end);

@@ -1,0 +1,180 @@
+[
+  {
+    "id": "paraformer",
+    "label": "实时字幕",
+    "kind": "model",
+    "directory": "models/sherpa-onnx-streaming-paraformer-bilingual-zh-en",
+    "revision": "8e40c43232a1c5c66c82111efc5820d3accca11b",
+    "source": "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en",
+    "files": [
+      {
+        "path": "decoder.int8.onnx",
+        "size": 71664561,
+        "url": "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en/resolve/8e40c43232a1c5c66c82111efc5820d3accca11b/decoder.int8.onnx",
+        "sha256": "f3cca9f77bb9d93c8fcbfb63ae617b6b1ee96818df3aa3b151c40658fe38594f"
+      },
+      {
+        "path": "encoder.int8.onnx",
+        "size": 165462184,
+        "url": "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en/resolve/8e40c43232a1c5c66c82111efc5820d3accca11b/encoder.int8.onnx",
+        "sha256": "81a70226a8934e6ed92aa1d4fc486b428b5398e2f2619ed4897b7294cab90e9a"
+      },
+      {
+        "path": "tokens.txt",
+        "size": 75756,
+        "url": "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en/resolve/8e40c43232a1c5c66c82111efc5820d3accca11b/tokens.txt",
+        "gitBlob": "57bc045ddda0434ed4440c38e14287c595b258d9"
+      }
+    ]
+  },
+  {
+    "id": "qwen",
+    "label": "Qwen3 最终转写",
+    "kind": "model",
+    "directory": "models/qwen3-asr",
+    "revision": "7278e1e70fe206f11671096ffdd38061171dd6e5",
+    "source": "https://huggingface.co/Qwen/Qwen3-ASR-1.7B",
+    "files": [
+      {
+        "path": "README.md",
+        "size": 57456,
+        "url": "https://huggingface.co/Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/README.md",
+        "gitBlob": "3a67d43f21febda213ff36efdb60ef10019af7f3"
+      },
+      {
+        "path": "chat_template.json",
+        "size": 1161,
+        "url": "https://huggingface.co/Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/chat_template.json",
+        "gitBlob": "c44736493efd71ec96218cc626904698cdb13235"
+      },
+      {
+        "path": "config.json",
+        "size": 6194,
+        "url": "https://huggingface.co/Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/config.json",
+        "gitBlob": "2bc16c9d4ca08963715cfb94d879799b9adbd0e9"
+      },
+      {
+        "path": "generation_config.json",
+        "size": 142,
+        "url": "https://huggingface.co/Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/generation_config.json",
+        "gitBlob": "7382a4d347c0a865b76bb1b8277f66a5ac312854"
+      },
+      {
+        "path": "merges.txt",
+        "size": 1671853,
+        "url": "https://huggingface.co/Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/merges.txt",
+        "gitBlob": "31349551d90c7606f325fe0f11bbb8bd5fa0d7c7"
+      },
+      {
+        "path": "model-00001-of-00002.safetensors",
+        "size": 4220320824,
+        "url": "https://huggingface.co/Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/model-00001-of-00002.safetensors",
+        "sha256": "a4cd1f1a04d90b757dc7f7dd26254e69a013b19e80efe590a83c6a3bde8608d6"
+      },
+      {
+        "path": "model-00002-of-00002.safetensors",
+        "size": 478200688,
+        "url": "https://huggingface.co/Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/model-00002-of-00002.safetensors",
+        "sha256": "6e0b9d9e09e2e0238e7ef3cc8a484ab387e91b90f1900bedf88bc92d7929ccfc"
+      },
+      {
+        "path": "model.safetensors.index.json",
+        "size": 64821,
+        "url": "https://huggingface.co/Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/model.safetensors.index.json",
+        "gitBlob": "1048a4eb4f21fef9aea06d8568a784b2b5595689"
+      },
+      {
+        "path": "preprocessor_config.json",
+        "size": 330,
+        "url": "https://huggingface.co/Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/preprocessor_config.json",
+        "gitBlob": "8f7f07346466d5d494ec0d4969d1c3d0190eed72"
+      },
+      {
+        "path": "tokenizer_config.json",
+        "size": 12487,
+        "url": "https://huggingface.co/Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/tokenizer_config.json",
+        "gitBlob": "b93109843922a40c6654c5449d3bf95372267c66"
+      },
+      {
+        "path": "vocab.json",
+        "size": 2776833,
+        "url": "https://huggingface.co/Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/vocab.json",
+        "gitBlob": "4783fe10ac3adce15ac8f358ef5462739852c569"
+      }
+    ]
+  },
+  {
+    "id": "sensevoice",
+    "label": "SenseVoice 离线识别",
+    "kind": "model",
+    "directory": "models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17-int8",
+    "revision": "2365baeacb507f821a0c8120fcee3d484dba7a07",
+    "source": "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17",
+    "files": [
+      {
+        "path": "LICENSE",
+        "size": 71,
+        "url": "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/2365baeacb507f821a0c8120fcee3d484dba7a07/LICENSE",
+        "gitBlob": "b5aafcccf5cfd5f7293c710bd6588dc6544eef2b"
+      },
+      {
+        "path": "README.md",
+        "size": 104,
+        "url": "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/2365baeacb507f821a0c8120fcee3d484dba7a07/README.md",
+        "gitBlob": "a05f82e98818e72a7184df7580dac4aa72ac41c3"
+      },
+      {
+        "path": "model.int8.onnx",
+        "size": 239233841,
+        "url": "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/2365baeacb507f821a0c8120fcee3d484dba7a07/model.int8.onnx",
+        "sha256": "c71f0ce00bec95b07744e116345e33d8cbbe08cef896382cf907bf4b51a2cd51"
+      },
+      {
+        "path": "tokens.txt",
+        "size": 315894,
+        "url": "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/2365baeacb507f821a0c8120fcee3d484dba7a07/tokens.txt",
+        "gitBlob": "2cfc92fc2ff26aaa690b7c01fd96b41109413881"
+      }
+    ]
+  },
+  {
+    "id": "emotion-model",
+    "label": "实时语气模型",
+    "kind": "model",
+    "directory": "models/emotion2vec_plus_base",
+    "revision": "b318240bfe67db81a8c572ecb37ce9c3759b81c9",
+    "source": "https://huggingface.co/emotion2vec/emotion2vec_plus_base",
+    "files": [
+      {
+        "path": "README.md",
+        "size": 5749,
+        "url": "https://huggingface.co/emotion2vec/emotion2vec_plus_base/resolve/b318240bfe67db81a8c572ecb37ce9c3759b81c9/README.md",
+        "gitBlob": "ccefd8db27fe7387b8712cf974e32c430d05da28"
+      },
+      {
+        "path": "config.yaml",
+        "size": 3170,
+        "url": "https://huggingface.co/emotion2vec/emotion2vec_plus_base/resolve/b318240bfe67db81a8c572ecb37ce9c3759b81c9/config.yaml",
+        "gitBlob": "5625920e6ae5a26903114251f0c1411178c4d5e2"
+      },
+      {
+        "path": "configuration.json",
+        "size": 343,
+        "url": "https://huggingface.co/emotion2vec/emotion2vec_plus_base/resolve/b318240bfe67db81a8c572ecb37ce9c3759b81c9/configuration.json",
+        "gitBlob": "f165bb611a674faee647fe64a9a7a00ad36f0a8f"
+      },
+      {
+        "path": "model.pt",
+        "size": 1118245678,
+        "url": "https://huggingface.co/emotion2vec/emotion2vec_plus_base/resolve/b318240bfe67db81a8c572ecb37ce9c3759b81c9/model.pt",
+        "sha256": "60710b5aae1dbe69bdac8920028fb05882d4314fd09031922b4b61ee9e7aadbd"
+      },
+      {
+        "path": "tokens.txt",
+        "size": 119,
+        "url": "https://huggingface.co/emotion2vec/emotion2vec_plus_base/resolve/b318240bfe67db81a8c572ecb37ce9c3759b81c9/tokens.txt",
+        "gitBlob": "e5a8dfffb0836ed38f37915905d1c05bdb18f1af"
+      }
+    ]
+  }
+]

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'">
+  <title>资源准备 · 智能会议和表达训练</title>
+  <link rel="stylesheet" href="resources.css">
+  <script src="resources.js" defer></script>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">智能会议和表达训练</p>
+    <h1>准备好，下一场会议</h1>
+    <p class="intro">首次使用时下载所需资源，之后可在本机完成识别与分析。你也可以先准备实时字幕，再按需添加其他能力。</p>
+    <div class="toolbar">
+      <button id="prepare-all" class="primary">一键准备全部资源</button>
+      <button id="cancel" hidden>取消当前任务</button>
+      <button id="refresh">重新检查</button>
+      <button id="ai-settings">配置我的 AI 服务</button>
+    </div>
+    <p id="summary" role="status" aria-live="polite">正在检查本地资源…</p>
+    <div id="resources" aria-label="可下载资源"></div>
+    <p id="error" role="alert"></p>
+    <footer>
+      <p>资源来自 GitHub、Hugging Face 和 PyPI，下载需要联网并受网络环境影响。中断后可重新点击准备，已完成的模型文件会复用，大文件支持断点续传。</p>
+      <p>完整模型约 6.3 GB，运行依赖还需额外空间；建议至少保留 15 GB 可用磁盘空间。录音不会因下载资源而上传。会议纪要和 AI 报告使用你在设置中配置的服务与密钥。</p>
+      <p>试用范围为个人学习与非商业使用。第三方模型、openSMILE 及依赖遵循各自许可证，详见随包的 THIRD_PARTY_NOTICES.md。</p>
+    </footer>
+  </main>
+</body>
+</html>

@@ -1,6 +1,15 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
+  openResources: () => ipcRenderer.invoke('open-resources'),
+  getResourceStatus: () => ipcRenderer.invoke('get-resource-status'),
+  installResource: id => ipcRenderer.invoke('install-resource', id),
+  cancelResourceInstall: () => ipcRenderer.invoke('cancel-resource-install'),
+  onResourceProgress: callback => {
+    const listener = (_event, items) => callback(items);
+    ipcRenderer.on('resource-progress', listener);
+    return () => ipcRenderer.removeListener('resource-progress', listener);
+  },
   reportRuntimeState: (sessionId, state) => ipcRenderer.send('runtime-state', { sessionId, state }),
   // 应用安全退出
   onAppExitRequested: (callback) => {

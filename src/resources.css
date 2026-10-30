@@ -1,0 +1,23 @@
+:root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; color: #e9eef8; background: #111827; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { max-width: 850px; margin: auto; padding: 32px; }
+.eyebrow { color: #73d7e7; font-size: 13px; margin: 0 0 10px; }
+h1 { font-size: 29px; letter-spacing: -.6px; margin: 0 0 12px; }
+.intro, footer { color: #a8b5cb; line-height: 1.7; font-size: 13px; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 22px 0; }
+button { border: 1px solid #3c4d66; color: #e9eef8; background: #1d2a3e; padding: 9px 13px; border-radius: 8px; cursor: pointer; font: inherit; font-size: 13px; }
+button:hover { background: #2b3c56; }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { background: #0e7490; border-color: #1598ae; }
+[hidden] { display: none !important; }
+#summary { color: #8fe0d1; font-size: 13px; }
+.resource { padding: 18px; background: #182337; border: 1px solid #2a3a52; border-radius: 12px; margin: 12px 0; }
+.resource-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.resource h2 { margin: 0; font-size: 15px; }
+.resource p { color: #a8b5cb; line-height: 1.6; font-size: 12px; margin: 8px 0 0; overflow-wrap: anywhere; }
+.resource .state { color: #8fe0d1; }
+.resource .error, #error { color: #ffaba8; white-space: pre-wrap; }
+progress { width: 100%; margin: 12px 0 0; accent-color: #32c7cd; height: 8px; }
+footer { border-top: 1px solid #2a3a52; margin-top: 24px; padding-top: 12px; font-size: 11px; }
+@media (max-width: 650px) { main { padding: 20px; } }

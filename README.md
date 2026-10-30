@@ -1,6 +1,8 @@
-# 智能表达训练（Expression Trainer）-Elon 升级版
+# 智能会议和表达训练（Expression Trainer）
 
 > 面向中文表达训练与会议复盘的本地 Electron 桌面应用。它把离线语音识别、词库分析、可选 LLM 教练反馈、会议纪要和本地音频分析组合为一条可审阅的工作流。
+
+macOS 试用安装版支持 M 系列芯片和 macOS 14+，安装后可在应用中点击下载模型和独立运行环境，无需自行安装 Node/Python。安装、资源大小、构建命令及验证边界见 [macOS 安装说明](docs/macos-installation.md)。源码开发环境的要求见下文。
 
 ## 目录
 
@@ -108,7 +110,7 @@
 | 组件 | 要求 | 何时需要 |
 | --- | --- | --- |
 | macOS | macOS 13+，Apple Silicon | 当前完整桌面能力；Swift Package 明确要求 macOS 13 |
-| Node.js | 18+ | 安装依赖、运行 Electron 和测试 |
+| Node.js | 22.12+ | 安装依赖、运行 Electron 和测试；安装版无需另装 Node |
 | npm | 随 Node.js 提供 | 运行脚本 |
 | Xcode Command Line Tools / Swift 5.9+ | 推荐 | 构建系统音频 helper |
 | 麦克风权限 | 录入麦克风时需要 | 只录 Native / Electron 系统输出时不申请麦克风；虚拟音频输入仍通过音频输入权限采集 |

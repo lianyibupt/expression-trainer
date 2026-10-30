@@ -2,6 +2,13 @@ const { app, BrowserWindow, ipcMain, session, Menu, desktopCapturer, dialog } = 
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
+// Keep existing installations' settings and archives when changing the display name.
+if (app.isPackaged && !app.commandLine.hasSwitch('user-data-dir')) {
+  app.setPath('userData', path.join(app.getPath('appData'), '智能表达训练'));
+}
+const { configureRuntime, getRuntimePaths } = require('./lib/runtime-paths');
+configureRuntime(app);
+const { ResourceManager } = require('./lib/resource-manager');
 const { initASR, feedAudio, stopRecognition, transcribeAudioFile, cancelQwen3Transcription } = require('./lib/asr');
 const { loadLexicon, analyzeText } = require('./lib/lexicon');
 const { sendFeedback, sendReport, sendMeetingMinutes, sendMeetingTitle, sendTranscriptPolish, sendTranscriptPunctuate, testConnection } = require('./lib/ai-feedback');
@@ -26,11 +33,13 @@ app.commandLine.appendSwitch('enable-features', [
 ].join(','));
 
 // 覆盖应用显示名称（菜单栏、Dock、任务栏、窗口标题）
-app.setName('智能表达训练');
+app.setName('智能会议和表达训练');
 
 let mainWindow;
 let settingsWindow;
 let promptEditorWindow;
+let resourcesWindow;
+let resourceManager;
 let exitGate;
 let rendererUnavailable = false;
 const recordingController = new RecordingController({ initASR, feedAudio, stopRecognition });
@@ -59,7 +68,7 @@ function normalizeAudioFile(inputPath) {
   return new Promise((resolve, reject) => {
     const tempDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'expression-trainer-upload-'));
     const outputPath = path.join(tempDir, 'audio.wav');
-    const child = spawn('ffmpeg', ['-y', '-i', inputPath, '-ac', '1', '-ar', '16000', '-sample_fmt', 's16', outputPath], {
+    const child = spawn(getRuntimePaths().ffmpeg, ['-y', '-i', inputPath, '-ac', '1', '-ar', '16000', '-sample_fmt', 's16', outputPath], {
       stdio: ['ignore', 'ignore', 'pipe']
     });
     const task = startTask('音频', '转码为 16 kHz 单声道 WAV', { pid: child.pid });
@@ -221,7 +230,7 @@ function getMeetingOutputDir(settings) {
 }
 
 function getNativeSystemAudioHelperPath() {
-  return path.join(__dirname, 'native', 'system-audio-helper', '.build', 'debug', 'system-audio-probe');
+  return getRuntimePaths().helper;
 }
 
 function decodeFloat32Base64(base64) {
@@ -396,7 +405,7 @@ function createMainWindow() {
     width: 1200,
     height: 800,
     backgroundColor: '#000000',
-    title: '智能表达训练',
+    title: '智能会议和表达训练',
     titleBarStyle: 'hiddenInset',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -407,6 +416,9 @@ function createMainWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
   mainWindow.webContents.on('did-finish-load', () => log('应用', '界面加载完成，等待操作'));
+  if (app.isPackaged) mainWindow.webContents.once('did-finish-load', () => {
+    if (resourceManager.status().some(item => !item.ready)) createResourcesWindow();
+  });
   mainWindow.webContents.on('did-fail-load', (_event, code, _description, _url, isMainFrame) => {
     if (isMainFrame && code !== -3) rendererUnavailable = true;
     log('应用', '界面加载失败', { errorCode: code }, 'ERROR');
@@ -485,8 +497,23 @@ function createSettingsWindow() {
   });
 }
 
+function createResourcesWindow() {
+  if (resourcesWindow && !resourcesWindow.isDestroyed()) { resourcesWindow.show(); resourcesWindow.focus(); return; }
+  resourcesWindow = new BrowserWindow({
+    width: 850, height: 780, minWidth: 640, minHeight: 520,
+    title: '资源准备 · 智能会议和表达训练', backgroundColor: '#111827',
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false }
+  });
+  resourcesWindow.loadFile(path.join(__dirname, 'src', 'resources.html'));
+  resourcesWindow.on('closed', () => { resourcesWindow = null; });
+}
+
 // App lifecycle
 app.whenReady().then(() => {
+  resourceManager = new ResourceManager({ root: getRuntimePaths().root });
+  resourceManager.on('progress', items => {
+    if (resourcesWindow && !resourcesWindow.isDestroyed()) resourcesWindow.webContents.send('resource-progress', items);
+  });
   const settings = loadSettings();
   log('应用', '应用启动', {
     modelPreset: settings.asr?.modelPreset, provider: settings.provider,
@@ -503,6 +530,8 @@ app.whenReady().then(() => {
       label: app.name,
       submenu: [
         { role: 'about' },
+        { label: '资源下载与检查…', click: createResourcesWindow },
+        { label: '设置…', accelerator: 'CommandOrControl+,', click: createSettingsWindow },
         { type: 'separator' },
         { role: 'hide' },
         { role: 'hideOthers' },
@@ -548,12 +577,20 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', (event) => {
   if (!requestSafeExit(event)) return;
+  resourceManager?.cancel();
   emotionWorker.close();
   log('应用', '应用正在退出');
   stopNativeSystemAudio();
 });
 
 // IPC Handlers
+ipcMain.handle('open-resources', () => { createResourcesWindow(); return true; });
+ipcMain.handle('get-resource-status', () => resourceManager.status());
+ipcMain.handle('install-resource', async (_event, id) => {
+  try { return { success: true, items: await (id === 'all' ? resourceManager.installAll() : resourceManager.install(id)) }; }
+  catch (error) { return { success: false, error: error.message, items: resourceManager.status() }; }
+});
+ipcMain.handle('cancel-resource-install', () => { resourceManager.cancel(); return true; });
 ipcMain.on('app-exit-ready', event => {
   if (event.sender !== mainWindow?.webContents) return;
   rendererUnavailable = false;

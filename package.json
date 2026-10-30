@@ -1,8 +1,8 @@
 {
   "name": "expression-trainer",
-  "productName": "智能表达训练",
+  "productName": "智能会议和表达训练",
   "version": "1.0.0",
-  "description": "智能表达训练系统 - 本地桌面版",
+  "description": "本地会议记录、语音识别和表达训练桌面应用",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -12,7 +12,11 @@
     "check:opensmile": "${OPENSMILE_PYTHON:-${QWEN3_ASR_PYTHON:-.venv-qwen3-asr/bin/python}} -c 'import opensmile; print(\"openSMILE ready\")'",
     "check:qwen3-asr": "QWEN3_ASR_PYTHON=.venv-qwen3-asr/bin/python .venv-qwen3-asr/bin/python scripts/qwen3_asr_worker.py --model Qwen/Qwen3-ASR-1.7B --check",
     "build:system-audio-helper": "cd native/system-audio-helper && CLANG_MODULE_CACHE_PATH=$(pwd)/.build/clang-module-cache swift build --cache-path $(pwd)/.build/swiftpm-cache",
-    "probe:system-audio": "cd native/system-audio-helper && .build/debug/system-audio-probe --duration 10 --out /tmp/system-audio-probe.wav"
+    "probe:system-audio": "cd native/system-audio-helper && .build/debug/system-audio-probe --duration 10 --out /tmp/system-audio-probe.wav",
+    "build:system-audio-helper:release": "cd native/system-audio-helper && CLANG_MODULE_CACHE_PATH=$(pwd)/.build/clang-module-cache swift build -c release --cache-path $(pwd)/.build/swiftpm-cache",
+    "pack:mac": "npm run build:system-audio-helper:release && electron-builder --config electron-builder.config.cjs --mac --arm64 --dir",
+    "dist:mac": "npm run build:system-audio-helper:release && electron-builder --config electron-builder.config.cjs --mac dmg --arm64",
+    "verify:package": "node scripts/verify-package.cjs"
   },
   "keywords": [
     "expression",
@@ -24,7 +28,9 @@
   "author": "sisi",
   "license": "MIT",
   "devDependencies": {
-    "electron": "^33.0.0"
+    "electron": "45.1.0",
+    "electron-builder": "26.18.0",
+    "playwright-core": "1.64.1"
   },
   "dependencies": {
     "sherpa-onnx-darwin-arm64": "^1.13.3",

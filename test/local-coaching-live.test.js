@@ -102,3 +102,30 @@ test('list shows recent findings chronologically and follows the newest item by 
   value.setLocalCoachingFollowLatest(true);
   assert.equal(value.localCoachingContent.scrollTop, 300);
 });
+
+test('live updates never rebuild category options or reset an in-progress selection', () => {
+  const { value } = setup();
+  let html = '', selected = '', optionWrites = 0, selectionWrites = 0;
+  value.localCoachingFilter = {};
+  Object.defineProperties(value.localCoachingFilter, {
+    innerHTML: { get: () => html, set: next => { html = next; optionWrites++; } },
+    value: { get: () => selected, set: next => { selected = next; selectionWrites++; } }
+  });
+  value.fullText = '这个这个接口。';
+  value.refreshLocalCoaching();
+  assert.equal(optionWrites, 1);
+  value.localCoachingFilter.value = 'repetition';
+  selectionWrites = 0;
+  for (let i = 0; i < 4; i++) {
+    value.fullText += '\n这个这个新接口。';
+    value.refreshLocalCoaching();
+  }
+  assert.equal(optionWrites, 1, 'the native popup must retain its option nodes across live refreshes');
+  assert.equal(selectionWrites, 0, 'refreshes must not overwrite keyboard/pointer selection state');
+  assert.equal(value.localCoachingFilter.value, 'repetition');
+  assert.match(value.localCoachingSummary.textContent, /共 5 条/);
+  assert.doesNotMatch(html, /（\d+）/, 'changing counts belong outside the stable options');
+  value.fullText = '';
+  value.refreshLocalCoaching();
+  assert.equal(optionWrites, 1, 'clearing a transcript must not rebuild category options either');
+});
