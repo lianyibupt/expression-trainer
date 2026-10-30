@@ -127,6 +127,7 @@ const DEFAULT_MEETING_CONFIG = {
   micDeviceId: '',
   systemAudioDeviceId: '',
   launchAtLogin: false,
+  expressionOptimizationEnabled: true,
   autoGenerateReport: true,
   autoSaveArtifacts: true,
   outputDir: ''
@@ -597,6 +598,7 @@ ipcMain.handle('get-settings', () => {
 
 ipcMain.handle('save-settings', (event, settings) => {
   saveSettings(settings);
+  mainWindow?.webContents.send('expression-optimization-changed', settings.meeting?.expressionOptimizationEnabled !== false);
   log('设置', '设置已保存');
   return { success: true };
 });
@@ -912,6 +914,9 @@ ipcMain.handle('save-meeting-minutes', async (event, { sessionDir, transcript, m
 // AI反馈（传入customPrompt）
 ipcMain.handle('get-realtime-feedback', async (event, text) => {
   const settings = loadSettings();
+  if (settings.meeting?.expressionOptimizationEnabled === false) {
+    return { success: true, skipped: true, feedback: '' };
+  }
   const providerConfig = getCurrentProviderSettings(settings);
   const customPrompt = loadCustomPrompt();
   try {

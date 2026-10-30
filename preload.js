@@ -14,6 +14,9 @@ contextBridge.exposeInMainWorld('api', {
   // 设置
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
+  onExpressionOptimizationChanged: callback => {
+    ipcRenderer.on('expression-optimization-changed', (_event, enabled) => callback(enabled));
+  },
   openSettings: () => ipcRenderer.invoke('open-settings'),
 
   // Prompt编辑器

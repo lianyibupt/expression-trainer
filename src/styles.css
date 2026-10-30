@@ -263,6 +263,7 @@ button {
 }
 
 .stage-panel[data-panel="live"] { grid-template-rows: auto minmax(0, 1fr) auto auto auto; }
+.stage-panel[data-panel="optimize"] { grid-template-rows: auto auto minmax(0, 1fr); }
 
 .live-emotion-panel { padding: 12px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
 .live-emotion-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; }
@@ -285,6 +286,9 @@ button {
   color: var(--dim);
   font-size: 11px;
 }
+
+.optimization-status { color: var(--muted); font-size: 13px; line-height: 1.6; }
+#btn-expression-optimization[aria-checked="true"] { border-color: var(--accent); }
 
 .panel-heading h2 {
   font-size: 22px;

@@ -80,6 +80,7 @@ class SettingsPage {
     this.micActivityThresholdInput = document.getElementById('mic-activity-threshold');
     this.autoSaveArtifactsInput = document.getElementById('auto-save-artifacts');
     this.autoGenerateReportInput = document.getElementById('auto-generate-report');
+    this.expressionOptimizationInput = document.getElementById('expression-optimization-enabled');
     this.btnSave = document.getElementById('btn-save');
     this.btnBack = document.getElementById('btn-back');
     this.btnCancel = document.getElementById('btn-cancel');
@@ -127,6 +128,7 @@ class SettingsPage {
   loadMeetingFields() {
     const asr = this.settings.asr || {};
     const meeting = this.settings.meeting || {};
+    this.expressionOptimizationInput.checked = meeting.expressionOptimizationEnabled !== false;
 
     const modelPreset = asr.modelPreset || (asr.engine === 'hybrid' ? 'paraformer-qwen3-final' : asr.engine === 'qwen3-asr-python' ? 'qwen3-asr-python' : asr.engine === 'paraformer' ? 'paraformer-streaming' : asr.modelPath ? 'sensevoice-custom' : 'sensevoice-int8');
 
@@ -322,6 +324,7 @@ class SettingsPage {
       micActivityThreshold: Number(this.micActivityThresholdInput.value || 0.02),
       autoSaveArtifacts: this.autoSaveArtifactsInput.checked,
       autoGenerateReport: this.autoGenerateReportInput.checked,
+      expressionOptimizationEnabled: this.expressionOptimizationInput.checked,
       outputDir: this.meetingOutputDirInput.value.trim()
     };
 

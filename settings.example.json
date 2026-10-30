@@ -39,6 +39,7 @@
     "micDeviceId": "",
     "systemAudioDeviceId": "",
     "autoGenerateReport": true,
+    "expressionOptimizationEnabled": true,
     "autoSaveArtifacts": true,
     "outputDir": ""
   }

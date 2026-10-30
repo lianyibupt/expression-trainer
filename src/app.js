@@ -125,6 +125,8 @@ class ExpressionTrainer {
     this.subtitleScroll = this.root.getElementById('subtitle-scroll');
     this.subtitleContainer = this.root.getElementById('subtitle-container');
     this.feedbackContent = this.root.getElementById('feedback-content');
+    this.btnExpressionOptimization = this.root.getElementById('btn-expression-optimization');
+    this.expressionOptimizationStatus = this.root.getElementById('expression-optimization-status');
     this.reportModal = this.root.getElementById('report-modal');
     this.reportBody = this.root.getElementById('report-body');
     this.minutesBody = this.root.getElementById('minutes-body');
@@ -136,6 +138,7 @@ class ExpressionTrainer {
   }
 
   bindEvents() {
+    this.btnExpressionOptimization.addEventListener('click', () => this.toggleExpressionOptimization());
     this.stageTabs.forEach(tab => {
       tab.addEventListener('click', () => this.switchStage(tab.dataset.stage));
     });
@@ -660,7 +663,7 @@ class ExpressionTrainer {
   }
 
   async loadSettingsAndMaybeAutoStart() {
-    this.settings = await this.api.getSettings();
+    await this.getSettings();
     this.audioSourceSelection = this.workspace.audioSourceSelection
       ? { ...this.workspace.audioSourceSelection }
       : { microphone: true, system: this.settings?.meeting?.captureSystemAudio !== false };
@@ -679,8 +682,46 @@ class ExpressionTrainer {
   }
 
   async getSettings() {
-    this.settings = await this.api.getSettings();
+    const settings = await this.api.getSettings();
+    this.applyExpressionOptimizationSetting(settings?.meeting?.expressionOptimizationEnabled !== false);
+    this.settings = settings;
     return this.settings;
+  }
+
+  expressionOptimizationEnabled() {
+    return this.settings !== null && this.settings?.meeting?.expressionOptimizationEnabled !== false;
+  }
+
+  applyExpressionOptimizationSetting(enabled) {
+    if (this.expressionOptimizationEnabled() !== enabled) {
+      this.expressionOptimizationRevision = (this.expressionOptimizationRevision || 0) + 1;
+    }
+    this.settings = { ...this.settings, meeting: { ...this.settings?.meeting, expressionOptimizationEnabled: enabled } };
+    this.btnExpressionOptimization.setAttribute('aria-checked', String(enabled));
+    this.btnExpressionOptimization.textContent = enabled ? 'AI 表达优化：已开启' : 'AI 表达优化：已关闭';
+    this.expressionOptimizationStatus.textContent = enabled
+      ? '实时 AI 反馈已开启，会调用大模型并消耗 token。'
+      : '实时 AI 反馈已关闭，不再发起表达优化请求；本地词库统计仍可使用。';
+  }
+
+  async toggleExpressionOptimization() {
+    if (this.btnExpressionOptimization.disabled) return;
+    const previous = this.expressionOptimizationEnabled();
+    const enabled = !previous;
+    this.btnExpressionOptimization.disabled = true;
+    this.applyExpressionOptimizationSetting(enabled);
+    try {
+      const settings = await this.api.getSettings();
+      const updated = { ...settings, meeting: { ...settings.meeting, expressionOptimizationEnabled: enabled } };
+      const result = await this.api.saveSettings(updated);
+      if (!result?.success) throw new Error(result?.error || '保存设置失败');
+      this.workspace.applyExpressionOptimizationSetting(enabled);
+    } catch (error) {
+      this.applyExpressionOptimizationSetting(previous);
+      this.addFeedbackItem(`表达优化设置保存失败：${error.message}`, 'filler');
+    } finally {
+      this.btnExpressionOptimization.disabled = false;
+    }
   }
 
   async restoreArchive(record) {
@@ -1469,10 +1510,13 @@ class ExpressionTrainer {
   // ===== 实时反馈 =====
 
   async requestRealtimeFeedback() {
+    if (!this.expressionOptimizationEnabled()) return;
     const generation = this.activeSessionGeneration;
+    const optimizationRevision = this.expressionOptimizationRevision || 0;
     this.lastFeedbackText = this.fullText;
     const result = await this.api.getRealtimeFeedback(this.fullText);
-    if (!this.isSessionCurrent(generation)) return;
+    if (!this.isSessionCurrent(generation) || !this.expressionOptimizationEnabled()
+      || optimizationRevision !== (this.expressionOptimizationRevision || 0)) return;
     if (result.success && result.feedback) {
       const lines = result.feedback.split('\n').filter(l => l.trim());
       lines.forEach(line => {

@@ -22,7 +22,14 @@ class MeetingWorkspace {
     this.exitControls = new Map();
     this.bindExitEvents();
     this.history = new MeetingHistoryPanel(this);
+    window.api.onExpressionOptimizationChanged?.(enabled => this.applyExpressionOptimizationSetting(enabled));
     this.create();
+  }
+
+  applyExpressionOptimizationSetting(enabled) {
+    for (const session of this.sessions.items.values()) {
+      session.trainer?.applyExpressionOptimizationSetting(enabled);
+    }
   }
 
   bindExitEvents() {
