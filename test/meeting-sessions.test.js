@@ -2,6 +2,18 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { MeetingSessions, createSessionAPI, createSaveSnapshot } = require('../src/meeting-sessions');
 
+test('clearing content resets an automatic title but preserves manual naming', () => {
+  const sessions = new MeetingSessions();
+  const session = sessions.create('a');
+  session.title = '旧内容的主题'; session.titleSource = 'auto';
+  sessions.resetAutomaticTitle(session.id);
+  assert.equal(session.title, '会议 1');
+  assert.equal(session.titleSource, 'default');
+  session.title = '手动名称'; session.titleSource = 'manual';
+  sessions.resetAutomaticTitle(session.id);
+  assert.equal(session.title, '手动名称');
+});
+
 test('closing a tab preserves its identity and workbench for reopening', () => {
   const sessions = new MeetingSessions();
   const a = sessions.create('a');

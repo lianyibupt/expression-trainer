@@ -68,6 +68,7 @@ contextBridge.exposeInMainWorld('api', {
   getRealtimeFeedback: (text) => ipcRenderer.invoke('get-realtime-feedback', text),
   getFinalReport: (data) => ipcRenderer.invoke('get-final-report', data),
   getMeetingMinutes: (data) => ipcRenderer.invoke('get-meeting-minutes', data),
+  getMeetingTitle: (data) => ipcRenderer.invoke('get-meeting-title', data),
   polishTranscript: (payload) => ipcRenderer.invoke('polish-transcript', payload),
   punctuateTranscript: (payload) => ipcRenderer.invoke('punctuate-transcript', payload),
   segmentText: (text) => ipcRenderer.invoke('segment-text', { text }),

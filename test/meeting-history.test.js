@@ -12,6 +12,26 @@ function fixture(t) {
   return root;
 }
 
+test('old default titles derive from transcripts without writes and content is searchable', t => {
+  const rootDir = fixture(t);
+  const saved = createTranscriptArtifact({ rootDir, sessionId: 'old', title: '会议 1', startedAt: '2026-01-01T00:00:00Z',
+    transcript: '说话人 1：大家好。今天主要讨论搜索系统迁移方案。稍后还要确认回滚预案。' });
+  const before = fs.readFileSync(saved.metadataPath, 'utf8');
+  const rows = listMeetingHistory(rootDir, { query: '回滚' });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].title, '搜索系统迁移方案');
+  assert.equal(readMeetingHistory(rootDir, rows[0].archiveId).title, rows[0].title);
+  assert.equal(fs.readFileSync(saved.metadataPath, 'utf8'), before);
+});
+
+test('custom titles are preserved while searching transcript and minutes content', t => {
+  const rootDir = fixture(t);
+  const saved = createTranscriptArtifact({ rootDir, title: '例会', transcript: '搜索系统迁移。' });
+  saveMinutesArtifact({ sessionDir: saved.sessionDir, minutes: '待办：准备回滚演练。' });
+  assert.equal(listMeetingHistory(rootDir, { query: '搜索系统' })[0].title, '例会');
+  assert.equal(listMeetingHistory(rootDir, { query: '回滚演练' }).length, 1);
+});
+
 test('saved meetings reopen exact text and artifact versions after a new history read', t => {
   const rootDir = fixture(t);
   const identity = { sessionId: 'meeting-a', title: '项目评审', startedAt: '2026-10-30T08:00:00Z', transcriptRevision: 3, transcriptSource: 'edited' };

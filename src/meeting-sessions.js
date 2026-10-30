@@ -9,7 +9,8 @@
     create(id = globalThis.crypto.randomUUID()) {
       if (this.items.has(id)) throw new Error('Duplicate session ID');
       const now = new Date();
-      const session = { id, title: `会议 ${this.items.size + 1}`, createdAt: now.toISOString(),
+      const defaultTitle = `会议 ${this.items.size + 1}`;
+      const session = { id, title: defaultTitle, defaultTitle, titleSource: 'default', createdAt: now.toISOString(),
         startedAt: null, endedAt: null, open: true, status: '待开始' };
       this.items.set(id, session);
       this.select(id);
@@ -17,6 +18,13 @@
     }
 
     get(id) { return this.items.get(id); }
+
+    resetAutomaticTitle(id) {
+      const session = this.get(id);
+      if (session?.titleSource !== 'auto') return;
+      session.title = session.defaultTitle;
+      session.titleSource = 'default';
+    }
 
     select(id) {
       const session = this.get(id);
@@ -74,6 +82,7 @@
       sessionId: session.id,
       archiveId: session.archiveId,
       title: session.title,
+      titleSource: session.titleSource,
       startedAt: session.startedAt || session.createdAt,
       endedAt: session.endedAt,
       transcript: trainer.transcriptEditor.value,

@@ -4,7 +4,7 @@ const fs = require('fs');
 const { spawn } = require('child_process');
 const { initASR, feedAudio, stopRecognition, transcribeAudioFile, cancelQwen3Transcription } = require('./lib/asr');
 const { loadLexicon, analyzeText } = require('./lib/lexicon');
-const { sendFeedback, sendReport, sendMeetingMinutes, sendTranscriptPolish, sendTranscriptPunctuate, testConnection } = require('./lib/ai-feedback');
+const { sendFeedback, sendReport, sendMeetingMinutes, sendMeetingTitle, sendTranscriptPolish, sendTranscriptPunctuate, testConnection } = require('./lib/ai-feedback');
 const { createTranscriptArtifact, saveMinutesArtifact, saveReportArtifact, saveAudioArtifact } = require('./lib/meeting-session');
 const { analyzeAudioFile, buildConversationAnalysis } = require('./lib/audio-analysis');
 const { runOpenSmile } = require('./lib/opensmile');
@@ -813,14 +813,14 @@ ipcMain.handle('transcribe-audio-file', async (event, { filePath, sessionId, job
 ipcMain.handle('cancel-audio-analysis', (event, { sessionId, jobId } = {}) => ({ success: Boolean(sessionId && jobId) && cancelQwen3Transcription(`${sessionId}:${jobId}`) }));
 
 ipcMain.handle('save-meeting-transcript', async (event, payload) => {
-  const { transcript, stats, audioPath, speakerSegments, sessionId, title, startedAt, endedAt, transcriptRevision, transcriptSource } = payload;
+  const { transcript, stats, audioPath, speakerSegments, sessionId, title, titleSource, startedAt, endedAt, transcriptRevision, transcriptSource } = payload;
   const settings = loadSettings();
   const rootDir = getMeetingOutputDir(settings);
   const task = startTask('保存', '保存会议原文与录音', { sessionId });
 
   try {
     const transcriptResult = createTranscriptArtifact({
-      sessionId, title, startedAt, endedAt, transcriptRevision, transcriptSource,
+      sessionId, title, titleSource, startedAt, endedAt, transcriptRevision, transcriptSource,
       speakerSegments: speakerSegments || [],
       sessionDir: payload.archiveId ? resolveArchive(rootDir, payload.archiveId) : undefined,
       rootDir,
@@ -932,6 +932,14 @@ ipcMain.handle('get-final-report', async (event, { fullText, stats }) => {
   } catch (error) {
     return { success: false, error: error.message };
   }
+});
+
+ipcMain.handle('get-meeting-title', async (_event, { fullText }) => {
+  try {
+    const settings = loadSettings();
+    const title = await sendMeetingTitle(fullText, { ...settings, ...getCurrentProviderSettings(settings) });
+    return { success: true, title };
+  } catch (error) { return { success: false, error: error.message }; }
 });
 
 ipcMain.handle('get-meeting-minutes', async (event, { fullText, stats }) => {

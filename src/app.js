@@ -1177,6 +1177,7 @@ class ExpressionTrainer {
         this.btnClear.classList.remove('hidden');
         this.syncTranscriptEditor();
         if (!stopResult?.finalTextPending) {
+          void this.ensureMeetingTitle();
           this.setSessionStatus('待确认');
           if (!options.suppressReview) this.showReviewModal();
         }
@@ -1447,6 +1448,7 @@ class ExpressionTrainer {
     this.syncTranscriptEditor();
     this.updateTextActionVisibility();
     this.setSessionStatus(this.fullText.trim() ? '已有原文' : '待开始');
+    void this.ensureMeetingTitle();
 
     if (requestFeedback) {
       this.requestRealtimeFeedback();
@@ -1668,6 +1670,14 @@ class ExpressionTrainer {
       throw new Error('这场会议没有可保存的原文');
     }
     if (hasTranscript) {
+      if (snapshot.transcript === this.transcriptEditor?.value && snapshot.transcriptRevision === this.transcriptRevision) {
+        const generation = this.activeSessionGeneration;
+        await this.ensureMeetingTitle();
+        if (this.isSessionCurrent(generation) && snapshot.transcript === this.transcriptEditor.value && snapshot.transcriptRevision === this.transcriptRevision) {
+          snapshot.title = this.session.title;
+          snapshot.titleSource = this.session.titleSource;
+        }
+      }
       const analysis = await this.api.analyzeText(snapshot.transcript);
       if (analysis) snapshot.stats = { ...snapshot.stats, fillers: analysis.fillers.length,
         hedges: analysis.hedges.length, vagueWords: analysis.vagueWords.length, totalWords: analysis.totalWords };
@@ -1675,6 +1685,34 @@ class ExpressionTrainer {
     const result = await this.api.saveMeetingTranscript(snapshot);
     if (!result.success) throw new Error(result.error || '保存原文失败');
     return result;
+  }
+
+  async ensureMeetingTitle() {
+    if (this.session.titleSource === 'manual' || !MeetingTitle.isDefaultMeetingTitle(this.session.title)) return;
+    const text = this.transcriptEditor.value.trim();
+    if (!text) return;
+    const generation = this.activeSessionGeneration;
+    const revision = this.transcriptRevision;
+    if (this.titleTask?.text === text && this.titleTask.generation === generation && this.titleTask.revision === revision) return this.titleTask.promise;
+    const originalTitle = this.session.title;
+    const task = { text, generation, revision };
+    task.promise = (async () => {
+      let title = '';
+      try {
+        const result = await this.api.getMeetingTitle?.({ fullText: text });
+        if (result?.success) title = MeetingTitle.normalizeMeetingTitle(result.title);
+      } catch { /* Naming must never prevent saving a meeting. */ }
+      if (MeetingTitle.isDefaultMeetingTitle(title)) title = '';
+      title ||= MeetingTitle.extractMeetingTitle(text);
+      if (!title || !this.isSessionCurrent(generation) || this.transcriptRevision !== revision ||
+          this.transcriptEditor.value.trim() !== text || this.session.title !== originalTitle || this.session.titleSource === 'manual') return;
+      this.session.title = title;
+      this.session.titleSource = 'auto';
+      this.workspace.render();
+    })();
+    this.titleTask = task;
+    try { await task.promise; }
+    finally { if (this.titleTask === task) this.titleTask = null; }
   }
 
   async refreshSavedArtifactFromFinal(sessionGeneration) {
@@ -1836,6 +1874,7 @@ class ExpressionTrainer {
 
   clearAll() {
     if (this.isRecording || this.isStoppingRecording && !this.session.endedAt) return;
+    this.workspace.sessions.resetAutomaticTitle(this.session.id);
     if (this.awaitingFinalTranscript) {
       this.finishFinalTranscriptWaiter({ success: false, error: '最终稿已取消', canSaveRealtime: false });
     }

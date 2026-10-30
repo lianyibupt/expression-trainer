@@ -12,7 +12,7 @@
     <div class="exit-card history-card">
       <div class="history-heading"><h2 id="history-title">历史会议</h2><button id="btn-history-close" class="btn-secondary">关闭</button></div>
       <p id="history-directory" class="history-directory"></p>
-      <form id="history-search-form" class="history-search"><input id="history-search" type="search" placeholder="搜索会议名称或日期" aria-label="搜索历史会议"><button class="btn-primary" type="submit">搜索 / 刷新</button></form>
+      <form id="history-search-form" class="history-search"><input id="history-search" type="search" placeholder="搜索会议名称、日期或内容关键词" aria-label="搜索历史会议"><button class="btn-primary" type="submit">搜索 / 刷新</button></form>
       <p id="history-status" role="status"></p>
       <div id="history-list" class="history-list"></div>
       <button id="btn-history-more" class="btn-secondary hidden">加载更多</button>
@@ -318,6 +318,7 @@
   </template>
   <script src="../lib/meeting-exit.js"></script>
   <script src="meeting-sessions.js"></script>
+  <script src="meeting-title.js"></script>
   <script src="markdown.js"></script>
   <script src="recording-audio.js"></script>
   <script src="app.js"></script>

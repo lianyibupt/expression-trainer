@@ -42,7 +42,7 @@ class MeetingWorkspace {
 
   create({ record } = {}) {
     const session = this.sessions.create(record?.sessionId);
-    if (record) Object.assign(session, { title: record.title, startedAt: record.startedAt,
+    if (record) Object.assign(session, { title: record.title, titleSource: record.titleSource, startedAt: record.startedAt,
       endedAt: record.endedAt, archiveId: record.archiveId, restored: true });
     const host = document.createElement('div');
     const root = host.attachShadow({ mode: 'open' });
@@ -78,6 +78,7 @@ class MeetingWorkspace {
     });
     root.getElementById('meeting-title').addEventListener('change', event => {
       session.title = event.target.value.trim() || session.title;
+      session.titleSource = 'manual';
       this.render();
     });
     root.getElementById('btn-view-recording').addEventListener('click', () => {
