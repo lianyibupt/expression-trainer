@@ -13,6 +13,25 @@ test('functional connectors, demonstratives, technical verbs and calibrated unce
   assert.equal(result.density, 100);
 });
 
+test('ordinary meeting verbs and emotions never trigger literary synonym substitutions', () => {
+  const { analyzeText } = require('../lib/lexicon');
+  for (const text of ['我想先看一下日志，再做接口测试。', '我觉得这个做法可以，想听听你的意见。', '今天很开心，谢谢大家。']) {
+    const result = analyzeText(text);
+    assert.equal(result.vagueWords.length, 0, text);
+    assert.ok(!/渴望|向往|审视|注视|雀跃|欣喜/.test(JSON.stringify(result.suggestions)));
+  }
+});
+
+test('AI coaching defaults to practical meetings and removes mandatory synonym and presentation advice', () => {
+  const { getRealtimePrompt, getReportPrompt } = require('../lib/prompts');
+  for (const prompt of [getRealtimePrompt('我想先看日志。'), getReportPrompt('我想先看日志。', {})]) {
+    assert.match(prompt.system, /工作会议/);
+    assert.match(prompt.system, /同义词/);
+    assert.match(prompt.system, /不确定性/);
+    assert.doesNotMatch(prompt.system, /情感词库替换表|钩子\(hook\)|金句捕捉|更细腻的情感词/);
+  }
+});
+
 test('detects eight practical coaching dimensions with evidence and non-invented templates', () => {
   const text = '呃，嗯，我们先开始。这个这个接口需要改。我觉得可能应该调整。效果很好。这一块之后再说。后续我们尽快跟进一下。'
     + '我们先讨论背景然后讨论限制然后看看实现然后回到背景然后再考虑细节。这个做法对吧，后面再说对吧，大家理解对吧。';
@@ -41,7 +60,7 @@ test('action closure prompts distinguish future commitments, completed work and 
 });
 
 test('single hedges do not prescribe turning guesses into facts', () => {
-  for (const text of ['我觉得应先验证再上线。', '可能导致超时，需要验证。', '我们不一定能复现。']) {
+  for (const text of ['我觉得应先验证再上线。', '可能导致超时，需要验证。', '我们不一定能复现。', '我觉得不一定需要重试。', '我觉得这个可能需要再验证。']) {
     assert.equal(coach.analyze(text).hedges.length, 0);
   }
   const result = coach.analyze('我觉得可能应该再检查。');
@@ -54,6 +73,7 @@ test('repeated restarts are flagged for audio review without blaming ASR on the 
   assert.ok(result.findings.some(item => item.category === 'repetition'));
   assert.match(result.findings.find(item => item.category === 'repetition').reason, /识别|ASR/);
   assert.equal(coach.analyze('对对对，这个判断成立。非常非常重要。').findings.length, 0);
+  assert.equal(coach.analyze('问题一个一个处理。嗯嗯。').findings.length, 0);
 });
 
 test('speaker labels keep original offsets and do not combine different speakers into a pattern', () => {

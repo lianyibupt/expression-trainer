@@ -47,6 +47,7 @@ class ExpressionTrainer {
     this.activeSessionGeneration = 0;
     this.pendingFinalTranscriptGeneration = 0;
     this.realtimePhraseBuffer = '';
+    this.localCoachingFollowLatest = true;
     this.realtimePhraseLastAt = 0;
     this.realtimeFlushChain = null;
     this.currentStage = 'live';
@@ -58,6 +59,7 @@ class ExpressionTrainer {
       this.renderLiveEmotion(result);
     });
     this.bindEvents();
+    this.refreshLocalCoaching();
     this.bindNativeSystemAudioEvents();
     this.bindASRFinalEvents();
     this.loadSettingsAndMaybeAutoStart();
@@ -75,6 +77,7 @@ class ExpressionTrainer {
     this.liveEmotionStatus = this.root.getElementById('live-emotion-status');
     this.liveEmotionCategories = this.root.getElementById('live-emotion-categories');
     this.liveEmotionDetail = this.root.getElementById('live-emotion-detail');
+    this.liveEmotionDiagnostics = this.root.getElementById('live-emotion-diagnostics');
     this.btnReport = this.root.getElementById('btn-report');
     this.btnSettings = this.root.getElementById('btn-settings');
     this.btnCloseReport = this.root.getElementById('btn-close-report');
@@ -127,6 +130,10 @@ class ExpressionTrainer {
     this.feedbackContent = this.root.getElementById('feedback-content');
     this.btnExpressionOptimization = this.root.getElementById('btn-expression-optimization');
     this.expressionOptimizationStatus = this.root.getElementById('expression-optimization-status');
+    this.localCoachingContent = this.root.getElementById('local-coaching-content');
+    this.localCoachingSummary = this.root.getElementById('local-coaching-summary');
+    this.localCoachingFilter = this.root.getElementById('local-coaching-filter');
+    this.btnLocalCoachingFollow = this.root.getElementById('btn-local-coaching-follow');
     this.reportModal = this.root.getElementById('report-modal');
     this.reportBody = this.root.getElementById('report-body');
     this.minutesBody = this.root.getElementById('minutes-body');
@@ -138,6 +145,33 @@ class ExpressionTrainer {
   }
 
   bindEvents() {
+    this.btnLocalCoachingFollow.addEventListener('click', () => this.setLocalCoachingFollowLatest(this.localCoachingFollowLatest === false));
+    this.localCoachingContent.addEventListener('wheel', event => {
+      if (event.deltaY < 0) this.setLocalCoachingFollowLatest(false);
+    }, { passive: true });
+    this.localCoachingContent.addEventListener('pointerdown', () => this.setLocalCoachingFollowLatest(false));
+    this.localCoachingContent.addEventListener('touchmove', () => this.setLocalCoachingFollowLatest(false), { passive: true });
+    this.localCoachingContent.addEventListener('keydown', event => {
+      if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) this.setLocalCoachingFollowLatest(false);
+    });
+    this.localCoachingContent.addEventListener('scroll', () => {
+      const list = this.localCoachingContent;
+      if (list.clientHeight > 0 && list.scrollHeight - list.clientHeight - list.scrollTop <= 8) {
+        this.setLocalCoachingFollowLatest(true);
+      }
+    }, { passive: true });
+    this.localCoachingFilter.addEventListener('change', () => this.renderLocalCoaching());
+    this.localCoachingContent.addEventListener('click', event => {
+      const button = event.target.closest('button[data-coaching-start]');
+      if (!button || button.disabled) return;
+      if (Number(button.dataset.coachingRevision) !== this.transcriptRevision) {
+        this.refreshLocalCoaching();
+        return;
+      }
+      this.switchStage('transcript');
+      this.transcriptEditor.focus();
+      this.transcriptEditor.setSelectionRange(Number(button.dataset.coachingStart), Number(button.dataset.coachingEnd));
+    });
     this.btnExpressionOptimization.addEventListener('click', () => this.toggleExpressionOptimization());
     this.stageTabs.forEach(tab => {
       tab.addEventListener('click', () => this.switchStage(tab.dataset.stage));
@@ -219,6 +253,7 @@ class ExpressionTrainer {
   }
 
   switchStage(stage) {
+    if (stage === 'optimize') this.refreshLocalCoaching();
     if (!stage || this.currentStage === stage) return;
 
     this.currentStage = stage;
@@ -263,6 +298,7 @@ class ExpressionTrainer {
     this.btnSaveMinutes.classList.add('hidden');
     this.minutesBody.innerHTML = '<p class="empty-state">原文已修改，请重新生成会议纪要。</p>';
     this.btnGenerateMinutes.textContent = '生成纪要';
+    this.scheduleLocalCoaching();
     this.workspace.render();
   }
 
@@ -453,19 +489,31 @@ class ExpressionTrainer {
     const speakerRows = (interaction.speakers || []).map(item => {
       return `<tr><td>${this.escapeHtml(item.speaker)}</td><td>${item.turnCount}</td><td>${Math.round(item.participation * 100)}%</td><td>${item.wordsPerMinute} 字/分</td><td>${item.fillers}/${item.hedges}</td></tr>`;
     }).join('');
-    return `<h3>互动关系与表达清晰度</h3><p>说话人 ${interaction.speakerCount || 0} 位，打断/重叠 ${interaction.interruptions || 0} 次，重叠约 ${Number(interaction.overlapSeconds || 0).toFixed(1)} 秒，平均回应延迟 ${interaction.averageResponseDelaySeconds == null ? '未检测' : `${interaction.averageResponseDelaySeconds} 秒`}。</p><p>长句 ${clarity.longSentenceCount || 0} 个，填充词 ${clarity.fillerCount || 0} 个，犹豫词 ${clarity.hedgeCount || 0} 个，信息密度 ${Math.round((clarity.informationDensity || 0) * 100)}%。</p>${speakerRows ? `<table class="audio-speaker-table"><thead><tr><th>说话人</th><th>轮次</th><th>发言占比</th><th>语速代理</th><th>口癖/犹豫</th></tr></thead><tbody>${speakerRows}</tbody></table>` : ''}`;
+    return `<h3>互动关系与表达清晰度</h3><p>说话人 ${interaction.speakerCount || 0} 位，打断/重叠 ${interaction.interruptions || 0} 次，重叠约 ${Number(interaction.overlapSeconds || 0).toFixed(1)} 秒，平均回应延迟 ${interaction.averageResponseDelaySeconds == null ? '未检测' : `${interaction.averageResponseDelaySeconds} 秒`}。</p><p>长句 ${clarity.longSentenceCount || 0} 个，赘余与重复提示 ${clarity.fillerCount || 0} 条，限定语堆叠 ${clarity.hedgeCount || 0} 条，规则简洁度 ${Math.round((clarity.informationDensity || 0) * 100)}%（非质量评分）。</p>${speakerRows ? `<table class="audio-speaker-table"><thead><tr><th>说话人</th><th>轮次</th><th>发言占比</th><th>语速代理</th><th>赘余/堆叠提示</th></tr></thead><tbody>${speakerRows}</tbody></table>` : ''}`;
   }
 
   renderLiveEmotion(result) {
     if (!this.liveEmotionStatus) return;
     this.liveEmotionStatus.dataset.status = result.status;
-    this.liveEmotionStatus.textContent = result.status === 'result' ? '近期语气' : result.message || '等待发言';
+    this.liveEmotionStatus.textContent = result.status === 'result' ? '语气参考（模型）' : result.message || '等待发言';
     this.liveEmotionCategories.innerHTML = (result.candidates || []).map((item, index) =>
-      `<span class="emotion-category ${index ? 'candidate' : 'primary'}">${index ? '候选 · ' : ''}${this.escapeHtml(item.label)} <strong>${Math.round(item.score * 100)}%</strong></span>`
+      `<span class="emotion-category ${index ? 'candidate' : 'primary'}">${index ? '候选 · ' : ''}${this.escapeHtml(item.label)}倾向</span>`
     ).join('');
-    this.liveEmotionDetail.textContent = result.endSeconds != null
-      ? `${this.formatAudioTime(result.startSeconds)}–${this.formatAudioTime(result.endSeconds)} · 所选音源的语气倾向；分数不是情绪概率`
-      : '基于声音的语气倾向；多人同时发言时结果可能不明确';
+    const sources = this.recordingAudio?.enabled || this.audioSourceSelection || {};
+    const sourceLabel = sources.microphone && sources.system ? '麦克风与系统输出的混合声音'
+      : sources.microphone ? '麦克风声音' : sources.system ? '系统输出声音' : '所选音源';
+    const saturated = result.scoreDiagnostics?.saturated || (result.candidates?.[0]?.score >= 0.995);
+    const timing = result.endSeconds != null ? `${this.formatAudioTime(result.startSeconds)}–${this.formatAudioTime(result.endSeconds)} · ` : '';
+    this.liveEmotionDetail.textContent = `${timing}${sourceLabel}；${saturated
+      ? '模型分数已饱和，不能当作确定性判断'
+      : '模型输出仅供参考，分数不是情绪概率'}`;
+    if (this.liveEmotionDiagnostics) {
+      const distribution = result.distribution || result.candidates || [];
+      const scores = distribution.slice(0, 3).map(item => `${item.label || '其他/未知'} ${Number(item.score).toPrecision(4)}`).join('；');
+      const quality = result.inputQuality;
+      const input = quality ? `输入 RMS ${quality.rms.toFixed(4)}，峰值 ${quality.peak.toFixed(4)}，有声帧占比（能量门限）${(quality.activeRatio * 100).toFixed(1)}%，削波样本 ${(quality.clippingRatio * 100).toFixed(2)}%。` : '';
+      this.liveEmotionDiagnostics.textContent = `${scores ? `原始模型得分（未经校准）：${scores}。` : ''}${input}`;
+    }
   }
 
   renderAudioTimeline(timeline) {
@@ -753,6 +801,7 @@ class ExpressionTrainer {
     this.updateStatsDisplay();
     this.updateTextActionVisibility();
     this.switchStage('transcript');
+    this.refreshLocalCoaching();
     this.setSessionStatus('已有原文');
   }
 
@@ -1152,7 +1201,9 @@ class ExpressionTrainer {
       await this.recordingAudio?.close();
       this.recordingAudio = null;
       await Promise.allSettled([...this.pendingAudioFeeds]);
+      this.localCoachingInterimText = '';
       await this.flushRealtimePhraseBuffer();
+      this.refreshLocalCoaching();
       const stopResult = await this.api.stopASR();
       if (stopResult?.recordingPath) this.pendingAudioPath = stopResult.recordingPath;
       if (stopResult?.speakerSegments) this.speakerSegments = stopResult.speakerSegments;
@@ -1310,47 +1361,45 @@ class ExpressionTrainer {
     const text = this.realtimePhraseBuffer.trim();
     this.realtimePhraseBuffer = '';
     this.realtimePhraseLastAt = 0;
+    if (!text) return previous;
+    const phrase = { text, generation: this.activeSessionGeneration };
+    (this.localCoachingPendingPhrases ||= []).push(phrase);
+    const current = () => this.isSessionCurrent(phrase.generation) && this.localCoachingPendingPhrases.includes(phrase);
 
     const task = (async () => {
-      if (previous) {
-        try { await previous; } catch (_) { /* 前序 flush 已自行兜底 */ }
-      }
-      if (!text) return;
-
-      let sentences = [text];
-      if (this.autoSegmentEnabled()) {
-        try {
-          const segmented = await this.api.segmentText(text);
-          if (segmented?.success && segmented.text) {
-            sentences = segmented.text.split('\n').map(s => s.trim()).filter(Boolean);
-            if (!sentences.length) sentences = [text];
-          }
-        } catch (_) {
-          // 断句失败：回退为整句，不丢内容
+      try {
+        if (previous) {
+          try { await previous; } catch (_) { /* Previous flush already handled its error. */ }
         }
-      }
-
-      for (const sentence of sentences) {
-        this.sentences.push(sentence);
-        this.fullText += `${this.fullText ? '\n' : ''}${sentence}`;
-        this.transcriptRevision++;
-        this.syncTranscriptEditor();
-        this.updateTextActionVisibility();
-        this.analyzeCurrentSentence(sentence);
-        this.renderSubtitle(sentence, true);
-      }
-
-      if (this.fullText.length - this.lastFeedbackText.length >= 30) {
-        this.requestRealtimeFeedback();
+        if (!current()) return;
+        let sentences = [text];
+        if (this.autoSegmentEnabled()) {
+          try {
+            const segmented = await this.api.segmentText(text);
+            if (segmented?.success && segmented.text) {
+              sentences = segmented.text.split('\n').map(s => s.trim()).filter(Boolean);
+              if (!sentences.length) sentences = [text];
+            }
+          } catch (_) { /* Keep the original phrase when segmentation fails. */ }
+        }
+        if (!current()) return;
+        for (const sentence of sentences) {
+          this.sentences.push(sentence);
+          this.fullText += `${this.fullText ? '\n' : ''}${sentence}`;
+          this.transcriptRevision++;
+          this.syncTranscriptEditor();
+          this.updateTextActionVisibility();
+          this.renderSubtitle(sentence, true);
+        }
+        if (this.fullText.length - this.lastFeedbackText.length >= 30) this.requestRealtimeFeedback();
+      } finally {
+        const stillPending = this.localCoachingPendingPhrases.includes(phrase);
+        this.localCoachingPendingPhrases = this.localCoachingPendingPhrases.filter(item => item !== phrase);
+        if (stillPending && this.isSessionCurrent(phrase.generation)) this.refreshLocalCoaching();
       }
     })();
-
     this.realtimeFlushChain = task;
-    try {
-      await task;
-    } catch (_) {
-      // 链内任务不应抛错（均已兜底），此处仅作防御
-    }
+    try { await task; } catch (_) { /* Keep the flush chain usable after a UI failure. */ }
   }
 
   handleASRResult({ text, isFinal, asrMs, mode }) {
@@ -1363,10 +1412,12 @@ class ExpressionTrainer {
     if (!fragment) return;
 
     if (isFinal) {
+      this.localCoachingInterimText = '';
       const now = Date.now();
       const gapMs = this.realtimePhraseLastAt ? now - this.realtimePhraseLastAt : 0;
       this.realtimePhraseBuffer = this.mergeRealtimeFragment(this.realtimePhraseBuffer, fragment);
       this.realtimePhraseLastAt = now;
+      this.scheduleLocalCoaching();
 
       if (this.shouldFlushRealtimePhrase(this.realtimePhraseBuffer, gapMs)) {
         this.flushRealtimePhraseBuffer();
@@ -1376,6 +1427,8 @@ class ExpressionTrainer {
       return;
     }
 
+    this.localCoachingInterimText = fragment;
+    this.scheduleLocalCoaching();
     const preview = this.mergeRealtimeFragment(this.realtimePhraseBuffer, fragment);
     this.renderSubtitle(preview, false);
   }
@@ -1411,47 +1464,134 @@ class ExpressionTrainer {
   }
 
   highlightText(text) {
-    const vagueWords = ['开心','难过','害怕','生气','不舒服','很好','很多','很快','很大','很小','好看','不好','喜欢','讨厌','觉得','想想'];
-    const categories = new Map([
-      ...vagueWords.map(word => [word, 'vague']),
-      ...['嗯','啊','呃','额','那个','就是','然后','这个','对吧','是吧','反正','基本上'].map(word => [word, 'filler']),
-      ...['可能','也许','大概','应该','我觉得','好像','似乎','或许','不一定','差不多','感觉'].map(word => [word, 'hedge'])
-    ]);
-    const pattern = new RegExp(`(${[...categories.keys()].sort((a, b) => b.length - a.length).join('|')})`, 'g');
-    return String(text ?? '').split(pattern).map(part => categories.has(part)
-      ? `<span class="${categories.get(part)}">${this.escapeHtml(part)}</span>`
-      : this.escapeHtml(part)).join('');
+    const source = String(text ?? '');
+    if (typeof ExpressionAnalysis === 'undefined') return this.escapeHtml(source);
+    const spans = ExpressionAnalysis.highlightSpans(ExpressionAnalysis.analyze(source));
+    let result = '', position = 0;
+    for (const span of spans) {
+      result += this.escapeHtml(source.slice(position, span.start));
+      result += `<span class="${span.type}">${this.escapeHtml(source.slice(span.start, span.end))}</span>`;
+      position = span.end;
+    }
+    return result + this.escapeHtml(source.slice(position));
   }
 
-  // ===== 分析 =====
+  // Throttle from the first new text, so continuous ASR updates cannot postpone feedback.
+  scheduleLocalCoaching() {
+    if (!this.localCoachingContent || typeof ExpressionAnalysis === 'undefined' || this.localCoachingTimer != null) return;
+    this.localCoachingTimer = setTimeout(() => {
+      this.localCoachingTimer = null;
+      this.refreshLocalCoaching();
+    }, 120);
+  }
 
-  async analyzeCurrentSentence(text) {
-    const stats = this.stats;
-    const analysis = await this.api.analyzeText(text);
-    if (this.stats !== stats) return;
-    if (analysis) {
-      this.stats.fillers += analysis.fillers.length;
-      this.stats.hedges += analysis.hedges.length;
-      this.stats.vagueWords += analysis.vagueWords.length;
-      this.stats.totalWords += analysis.totalWords;
-      this.updateStatsDisplay();
-      // 碰到笼统词 → 立刻在反馈栏弹出替换建议
-      if (analysis.vagueWords && analysis.vagueWords.length > 0) {
-        analysis.vagueWords.forEach(item => {
-          const alts = item.alternatives.slice(0, 3).join(' / ');
-          this.addFeedbackItem(`「${item.word}」→ ${alts}`, 'vague');
-        });
+  resetLocalCoachingRealtime() {
+    clearTimeout(this.localCoachingTimer);
+    this.localCoachingTimer = null;
+    this.localCoachingInterimText = '';
+    this.localCoachingPendingPhrases = [];
+    this.localCoachingCommittedText = undefined;
+    this.localCoachingCommittedAnalysis = null;
+    this.localCoachingAnalysisText = undefined;
+  }
+
+  getLocalCoachingText() {
+    const queued = (this.localCoachingPendingPhrases || []).map(item => item.text);
+    const tail = this.mergeRealtimeFragment(this.realtimePhraseBuffer || '', this.localCoachingInterimText || '');
+    return [this.fullText, ...queued, tail].filter(Boolean).join('\n');
+  }
+
+  refreshLocalCoaching() {
+    if (!this.localCoachingContent || typeof ExpressionAnalysis === 'undefined') return;
+    clearTimeout(this.localCoachingTimer);
+    this.localCoachingTimer = null;
+    // Persisted stats use confirmed text only; previews can be corrected by the recognizer.
+    if (this.localCoachingCommittedText !== this.fullText) {
+      this.localCoachingCommittedAnalysis = ExpressionAnalysis.analyze(this.fullText);
+      this.localCoachingCommittedText = this.fullText;
+    }
+    const text = this.getLocalCoachingText();
+    if (this.localCoachingAnalysisText !== text) {
+      this.localAnalysis = text === this.fullText ? this.localCoachingCommittedAnalysis : ExpressionAnalysis.analyze(text);
+      this.localCoachingAnalysisText = text;
+    }
+    const analysis = this.localCoachingCommittedAnalysis;
+    this.stats = { ...this.stats, fillers: analysis?.fillers.length || 0, hedges: analysis?.hedges.length || 0,
+      vagueWords: analysis?.vagueWords.length || 0, totalWords: analysis?.totalWords || 0,
+      density: analysis?.density ?? 100, analysisVersion: 2,
+      redundantCharacters: analysis?.redundantCharacters || 0 };
+    this.updateStatsDisplay();
+    this.renderLocalCoaching();
+  }
+
+  renderLocalCoachingFollowButton() {
+    if (!this.btnLocalCoachingFollow) return;
+    const follow = this.localCoachingFollowLatest !== false;
+    this.btnLocalCoachingFollow.setAttribute('aria-pressed', String(follow));
+    this.btnLocalCoachingFollow.textContent = follow ? '跟随最新：开' : '跟随最新：暂停';
+  }
+
+  setLocalCoachingFollowLatest(enabled) {
+    const changed = this.localCoachingFollowLatest !== enabled;
+    this.localCoachingFollowLatest = enabled;
+    this.renderLocalCoachingFollowButton();
+    if (enabled && changed) this.scrollLocalCoachingToLatest();
+  }
+
+  scrollLocalCoachingToLatest() {
+    const scroll = () => {
+      if (this.localCoachingFollowLatest !== false && this.localCoachingContent) {
+        this.localCoachingContent.scrollTop = this.localCoachingContent.scrollHeight;
       }
-      // 碰到填充词 → 弹提醒
-      if (analysis.fillers && analysis.fillers.length >= 2) {
-        const uniqueFillers = [...new Set(analysis.fillers.map(f => f.word))].slice(0, 3);
-        this.addFeedbackItem(`填充词：${uniqueFillers.join('、')}——试试停顿`, 'filler');
-      }
-      // 碰到犹豫词 → 弹提醒
-      if (analysis.hedges && analysis.hedges.length >= 1) {
-        const uniqueHedges = [...new Set(analysis.hedges.map(h => h.word))].slice(0, 2);
-        this.addFeedbackItem(`「${uniqueHedges.join('」「')}」→ 直接说`, 'hedge');
-      }
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(scroll);
+    else scroll();
+  }
+
+  renderLocalCoaching() {
+    if (!this.localCoachingContent || typeof ExpressionAnalysis === 'undefined') return;
+    const selected = this.localCoachingFilter.value || '';
+    const analysis = this.localAnalysis;
+    const categories = analysis?.categories || ExpressionAnalysis.categories.map(item => ({ ...item, count: 0 }));
+    this.localCoachingFilter.innerHTML = '<option value="">全部类别</option>' + categories.map(item =>
+      `<option value="${item.id}">${this.escapeHtml(item.label)}（${item.count}）</option>`).join('');
+    this.localCoachingFilter.value = selected;
+    const findings = analysis?.findings || [];
+    // Give every dimension room, instead of allowing repeated fillers to bury useful action prompts.
+    const chronological = [...findings].sort((a, b) => a.start - b.start || a.end - b.end);
+    const visible = selected ? chronological.filter(item => item.category === selected).slice(-24)
+      : categories.flatMap(category => chronological.filter(item => item.category === category.id).slice(-3))
+        .sort((a, b) => a.start - b.start || a.end - b.end);
+    const count = selected ? findings.filter(item => item.category === selected).length : findings.length;
+    this.localCoachingSummary.textContent = analysis
+      ? `共 ${count} 条规则线索，展示 ${visible.length} 条${selected ? '（最近 24 条）' : '（每类最近 3 条）'}。${this.localCoachingAnalysisText !== this.fullText ? '包含识别中预览，确认后可定位。' : ''}仅在本机分析，不调用 LLM；多人发言按原标签保留归属。`
+      : '录制、粘贴或打开历史原文后，这里会给出本地建议。正常的“做、想、看”不需要换词。';
+    const scrollTop = this.localCoachingContent.scrollTop;
+    const viewportTop = this.localCoachingContent.getBoundingClientRect?.().top;
+    const anchor = [...(this.localCoachingContent.querySelectorAll?.('.coaching-card') || [])]
+      .find(card => card.getBoundingClientRect().bottom > viewportTop);
+    const anchorTop = anchor?.getBoundingClientRect().top;
+    const anchorId = anchor?.dataset.coachingId;
+    const analysisText = this.localCoachingAnalysisText ?? this.fullText;
+    this.localCoachingContent.innerHTML = visible.map(item => {
+      const line = analysisText.slice(0, item.start).split('\n').length;
+      const confirmed = item.end <= this.fullText.length && this.fullText.slice(item.start, item.end) === analysisText.slice(item.start, item.end);
+      const attribution = item.speaker ? `${item.speaker} · ` : '';
+      const confidence = item.confidence === 'low' ? '待核实' : '规则匹配，需复核';
+      return `<article class="coaching-card" data-coaching-id="${item.ruleId}:${item.start}"><div class="coaching-card-heading"><strong>${this.escapeHtml(item.categoryLabel)}</strong><small>${this.escapeHtml(attribution)}${confirmed ? `第 ${line} 行` : '识别中预览'} · ${confidence}</small></div>
+        <p class="coaching-evidence">原文：${this.escapeHtml(item.evidence)}</p>
+        <p class="coaching-context">上下文：${this.escapeHtml(item.context)}</p>
+        <p>${this.escapeHtml(item.reason)}</p><p><strong>建议：</strong>${this.escapeHtml(item.advice)}</p>
+        <div class="coaching-template">话术模板（括号内需自行补充）：${this.escapeHtml(item.template)}</div>
+        <button type="button" class="btn-sm" data-coaching-start="${item.start}" data-coaching-end="${item.end}" data-coaching-revision="${this.transcriptRevision}" ${confirmed ? '' : 'disabled'}>${confirmed ? '定位原文' : '识别中，确认后可定位'}</button></article>`;
+    }).join('') || '<p class="coaching-note">当前类别没有命中规则。这不代表已经完成语义评价；无需为了产生建议而换词。</p>';
+    this.renderLocalCoachingFollowButton();
+    if (this.localCoachingFollowLatest !== false) this.scrollLocalCoachingToLatest();
+    else {
+      this.localCoachingContent.scrollTop = scrollTop;
+      const nextAnchor = [...(this.localCoachingContent.querySelectorAll?.('.coaching-card') || [])]
+        .find(card => card.dataset.coachingId === anchorId);
+      if (nextAnchor && anchorTop != null) this.localCoachingContent.scrollTop += nextAnchor.getBoundingClientRect().top - anchorTop;
     }
   }
 
@@ -1462,6 +1602,7 @@ class ExpressionTrainer {
   async loadTranscriptText(text, { duration = 0, requestFeedback = true, sessionGeneration = this.activeSessionGeneration } = {}) {
     if (!this.isSessionCurrent(sessionGeneration)) return false;
     this.subtitleContainer.innerHTML = '';
+    this.realtimePhraseBuffer = '';
     this.fullText = text.trim();
     const revision = ++this.transcriptRevision;
     this.syncTranscriptEditor();
@@ -1474,7 +1615,7 @@ class ExpressionTrainer {
       line.innerHTML = this.highlightText(sentence);
       this.subtitleContainer.appendChild(line);
 
-      const analysis = await this.api.analyzeText(sentence);
+      const analysis = typeof ExpressionAnalysis !== 'undefined' ? ExpressionAnalysis.analyze(sentence) : await this.api.analyzeText(sentence);
       if (!this.isSessionCurrent(sessionGeneration) || this.transcriptRevision !== revision) return false;
       if (analysis) {
         this.stats.fillers += analysis.fillers.length;
@@ -1489,6 +1630,7 @@ class ExpressionTrainer {
     this.syncTranscriptEditor();
     this.updateTextActionVisibility();
     this.setSessionStatus(this.fullText.trim() ? '已有原文' : '待开始');
+    this.refreshLocalCoaching();
     void this.ensureMeetingTitle();
 
     if (requestFeedback) {
@@ -1502,8 +1644,10 @@ class ExpressionTrainer {
     this.statHedges.textContent = this.stats.hedges;
     this.statVague.textContent = this.stats.vagueWords;
     if (this.stats.totalWords > 0) {
-      const density = ((this.stats.totalWords - this.stats.fillers - this.stats.hedges) / this.stats.totalWords * 100).toFixed(0);
+      const density = this.stats.density ?? Math.max(0, Math.round((this.stats.totalWords - this.stats.fillers) / this.stats.totalWords * 100));
       this.statDensity.textContent = density + '%';
+    } else {
+      this.statDensity.textContent = '--';
     }
   }
 
@@ -1724,7 +1868,8 @@ class ExpressionTrainer {
       }
       const analysis = await this.api.analyzeText(snapshot.transcript);
       if (analysis) snapshot.stats = { ...snapshot.stats, fillers: analysis.fillers.length,
-        hedges: analysis.hedges.length, vagueWords: analysis.vagueWords.length, totalWords: analysis.totalWords };
+        hedges: analysis.hedges.length, vagueWords: analysis.vagueWords.length, totalWords: analysis.totalWords,
+        density: analysis.density, redundantCharacters: analysis.redundantCharacters, analysisVersion: analysis.version };
     }
     const result = await this.api.saveMeetingTranscript(snapshot);
     if (!result.success) throw new Error(result.error || '保存原文失败');
@@ -1883,6 +2028,9 @@ class ExpressionTrainer {
     this.stats = { fillers: 0, hedges: 0, vagueWords: 0, totalWords: 0, duration: 0 };
     this.updateStatsDisplay();
     this.feedbackContent.innerHTML = '';
+    this.localAnalysis = null;
+    this.resetLocalCoachingRealtime();
+    this.renderLocalCoaching();
   }
 
   showError(msg) {

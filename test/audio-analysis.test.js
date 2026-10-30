@@ -67,7 +67,8 @@ test('buildConversationAnalysis combines sentiment, clarity, participation, and 
   assert.equal(result.atmosphere.nonVerbal.laughterCount, 1);
   assert.equal(result.interaction.speakerCount, 2);
   assert.equal(result.interaction.turnCount, 2);
-  assert.equal(result.clarity.hedgeCount, 1);
+  assert.equal(result.clarity.hedgeCount, 0, 'a calibrated possibility is not a hedging defect');
+  assert.equal(result.clarity.informationDensity, 1);
 });
 
 test('analysis keeps participation but no longer computes per-speaker acoustics or emotions', () => {

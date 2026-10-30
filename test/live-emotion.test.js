@@ -74,6 +74,29 @@ test('unknown, low scores and malformed scores do not fabricate an emotion', () 
   assert.throws(() => classifyScores({ labels: ['happy'], scores: [] }));
 });
 
+test('saturated raw scores retain distribution and are explicitly marked uncalibrated', () => {
+  const result = classifyScores({ labels: ['中立/neutral', '开心/happy', '其他/other'], scores: [1, 1e-9, 1e-10] });
+  assert.equal(result.candidates[0].key, 'neutral');
+  assert.equal(result.scoreDiagnostics.saturated, true);
+  assert.equal(result.scoreDiagnostics.calibrated, false);
+  assert.equal(result.distribution[1].score, 1e-9);
+  assert.equal(classifyScores(scores).scoreDiagnostics.saturated, false);
+});
+
+test('audio input diagnostics describe the actual analysis window without including audio', async () => {
+  const events = [];
+  const live = new LiveEmotion({ infer: async () => scores });
+  live.start('a', event => events.push(event));
+  live.feed('a', voice(6)); await tick();
+  const quality = events.at(-1).inputQuality;
+  assert.ok(Math.abs(quality.rms - 0.1) < 0.00001);
+  assert.ok(Math.abs(quality.peak - 0.1) < 0.00001);
+  assert.equal(quality.activeRatio, 1);
+  assert.equal(quality.clippingRatio, 0);
+  assert.equal(quality.samples, undefined);
+  live.stop('a');
+});
+
 test('model startup errors reject cleanly before there is an inference request', async () => {
   const { EmotionWorker } = require('../lib/live-emotion');
   const { EventEmitter } = require('node:events');

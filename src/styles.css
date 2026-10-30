@@ -273,6 +273,9 @@ button {
 .emotion-category { display: inline-flex; align-items: center; gap: 12px; margin-top: 10px; padding: 6px 12px; border-radius: 6px; color: var(--text); background: #173448; border: 1px solid #285570; font-size: 14px; }
 .emotion-category.candidate { color: var(--muted); background: var(--panel-soft); border-color: var(--line); font-size: 12px; }
 .live-emotion-panel p { margin-top: 8px; color: var(--muted); font-size: 11px; }
+.emotion-diagnostics { margin-top: 8px; color: var(--muted); font-size: 11px; }
+.emotion-diagnostics summary { cursor: pointer; }
+.emotion-diagnostics p { overflow-wrap: anywhere; line-height: 1.6; }
 
 .panel-heading {
   display: flex;
@@ -496,6 +499,26 @@ button {
 .stat-orange { color: var(--orange); }
 .stat-yellow { color: var(--warn); }
 .stat-green { color: var(--good); }
+
+.coaching-column { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; }
+.local-coaching-panel { display: flex; flex-direction: column; min-height: 180px; flex: 1; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.local-coaching-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.local-coaching-heading h3 { font-size: 14px; }
+.local-coaching-heading select { max-width: 100%; background: var(--panel); color: var(--muted); border: 1px solid var(--line); border-radius: 5px; padding: 6px; }
+.coaching-note { color: var(--muted); font-size: 12px; line-height: 1.7; padding-top: 12px; }
+.local-coaching-panel > .coaching-note { padding: 10px 14px; }
+.local-coaching-content { min-height: 0; overflow-y: auto; overscroll-behavior: contain; overflow-anchor: none; padding: 0 14px 14px; }
+.local-coaching-content:focus-visible { outline: 1px solid var(--accent); outline-offset: -2px; }
+.coaching-card { padding: 14px 0; border-bottom: 1px solid var(--line); font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+.coaching-card:last-child { border-bottom: 0; }
+.coaching-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.coaching-card-heading small { color: var(--muted); }
+.coaching-evidence { color: var(--warn); margin: 7px 0; white-space: pre-wrap; }
+.coaching-context { color: var(--muted); margin-bottom: 8px; white-space: pre-wrap; }
+.coaching-template { background: var(--panel-soft); border-left: 2px solid var(--accent); padding: 8px 10px; margin: 8px 0; }
+.coaching-messages { flex: 0 0 auto; border: 1px solid var(--line); border-radius: 8px; }
+.coaching-messages summary { padding: 12px 14px; color: var(--muted); cursor: pointer; font-size: 13px; }
+.coaching-messages .feedback-content { max-height: 180px; }
 
 .feedback-panel {
   min-height: 0;

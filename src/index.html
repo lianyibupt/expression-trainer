@@ -126,6 +126,7 @@
             <div class="live-emotion-heading"><strong>实时语气</strong><span id="live-emotion-status" role="status">开始录音后提供反馈</span></div>
             <div id="live-emotion-categories" class="live-emotion-categories"></div>
             <p id="live-emotion-detail">基于声音，每约 3 秒更新最近 6 秒的语气倾向</p>
+            <details class="emotion-diagnostics"><summary>模型与输入诊断</summary><p id="live-emotion-diagnostics"></p></details>
           </div>
 
           <div class="audio-source-controls" role="group" aria-label="录音声音来源">
@@ -213,26 +214,38 @@
           <div class="analysis-grid">
             <div class="metrics-panel">
               <div class="stat-row">
-                <span class="stat-label">笼统词</span>
+                <span class="stat-label">具体度提示</span>
                 <span id="stat-vague" class="stat-value stat-red">0</span>
               </div>
               <div class="stat-row">
-                <span class="stat-label">填充词</span>
+                <span class="stat-label">赘余与重复提示</span>
                 <span id="stat-fillers" class="stat-value stat-orange">0</span>
               </div>
               <div class="stat-row">
-                <span class="stat-label">犹豫词</span>
+                <span class="stat-label">限定语堆叠</span>
                 <span id="stat-hedges" class="stat-value stat-yellow">0</span>
               </div>
               <div class="stat-row">
-                <span class="stat-label">表达密度</span>
+                <span class="stat-label">规则简洁度</span>
                 <span id="stat-density" class="stat-value stat-green">--</span>
               </div>
+              <p class="coaching-note">按当前原文匹配规则，不是表达质量评分。简洁度仅按疑似赘余字符估算，保留合理的不确定性。</p>
             </div>
 
-            <div class="feedback-panel">
-              <div class="feedback-title">实时反馈</div>
-              <div id="feedback-content" class="feedback-content"></div>
+            <div class="coaching-column">
+              <section class="local-coaching-panel" aria-label="本地表达建议">
+                <div class="local-coaching-heading">
+                  <h3>本地表达建议</h3>
+                  <button id="btn-local-coaching-follow" class="btn-sm" type="button" aria-pressed="true">跟随最新：开</button>
+                  <select id="local-coaching-filter" aria-label="筛选本地建议类别"><option value="">全部类别</option></select>
+                </div>
+                <p id="local-coaching-summary" class="coaching-note" role="status" aria-live="polite"></p>
+                <div id="local-coaching-content" class="local-coaching-content" tabindex="0" role="region" aria-label="本地建议列表"></div>
+              </section>
+              <details class="coaching-messages">
+                <summary>AI 反馈与运行消息</summary>
+                <div id="feedback-content" class="feedback-content"></div>
+              </details>
             </div>
           </div>
         </section>
@@ -323,6 +336,7 @@
   <script src="meeting-title.js"></script>
   <script src="markdown.js"></script>
   <script src="recording-audio.js"></script>
+  <script src="expression-analysis.js"></script>
   <script src="app.js"></script>
   <script src="history.js"></script>
   <script src="workspace.js"></script>

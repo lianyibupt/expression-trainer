@@ -63,7 +63,7 @@
       const text = unit.text;
       // Lexical repeats can be actual restarts OR ASR duplication; never diagnose their cause.
       const repeats = [];
-      for (const match of text.matchAll(/(这个|那个|就是|然后|其实|我们|我|你|它|有一些|所有|这种|因为|所以|可以|需要|可能|一个|这里|这边)(?:[，,、\s]*\1)+/g)) {
+      for (const match of text.matchAll(/(这个|那个|就是|然后|其实|我们|我|你|它|有一些|所有|这种|因为|所以|可以|需要|可能|这里|这边)(?:[，,、\s]*\1)+/g)) {
         repeats.push([match.index, match.index + match[0].length]);
         add(unit, match.index, match.index + match[0].length, {
           ruleId: 'repeated-restart', category: 'repetition', priority: 2, confidence: 'medium',
@@ -75,6 +75,7 @@
 
       const sounds = [...text.matchAll(/嗯+|呃+|(?<![\p{L}\p{N}])额+(?![\p{L}\p{N}])|(?<!\p{L})啊+(?=[，,、\s]|$)|怎么说呢/g)];
       for (const match of sounds) {
+        if (sounds.length === 1 && /^嗯+$/.test(match[0])) continue;
         // A single conversational response is useful; clustered hesitation is worth reviewing.
         if (sounds.length < 2 && !/^(?:嗯|呃|额|啊){2,}$/.test(match[0]) && match[0] !== '怎么说呢') continue;
         add(unit, match.index, match.index + match[0].length, {
@@ -101,6 +102,8 @@
 
       const hedgePattern = new RegExp(`(${hedgeTerms.join('|')})(?:[，,\\s]*(?:(?:这个|就是|还|会|是|也|都|就)[，,\\s]*)?(?:${hedgeTerms.join('|')}))+`, 'g');
       for (const match of text.matchAll(hedgePattern)) {
+        // A stance followed by uncertainty ("我觉得可能") is ordinary meeting language.
+        if ([...match[0].matchAll(new RegExp(hedgeTerms.join('|'), 'g'))].length < 3) continue;
         add(unit, match.index, match.index + match[0].length, {
           ruleId: 'stacked-hedges', category: 'hedging', priority: 2, confidence: 'medium',
           reason: '多个限定语紧邻叠加，听者难以分辨是在提出判断还是等待验证。',
