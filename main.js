@@ -2,10 +2,9 @@ const { app, BrowserWindow, ipcMain, session, Menu, desktopCapturer, dialog } = 
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
-// Keep existing installations' settings and archives when changing the display name.
-if (app.isPackaged && !app.commandLine.hasSwitch('user-data-dir')) {
-  app.setPath('userData', path.join(app.getPath('appData'), '智能表达训练'));
-}
+// Resolve the stable settings directory before runtime initialization caches it.
+const { configureUserDataPath } = require('./lib/app-user-data');
+configureUserDataPath(app);
 const { configureRuntime, getRuntimePaths } = require('./lib/runtime-paths');
 configureRuntime(app);
 const { ResourceManager } = require('./lib/resource-manager');
